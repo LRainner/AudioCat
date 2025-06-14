@@ -17,6 +17,15 @@
         "width": 800,
         "height": 600,
         "visible": false
+      },
+      {
+        "label": "preference",
+        "title": "偏好设置",
+        "minWidth": 800,
+        "minHeight": 600,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "url": "preference.html"
       }
     ],
     "security": {
@@ -33,5 +42,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  }
+  },
+  "mainBinaryName": "tauri-demo"
 }
