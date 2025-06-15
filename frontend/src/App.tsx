@@ -1,49 +1,76 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { appDataDir } from '@tauri-apps/api/path';
+import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
+import { BaseDirectory } from '@tauri-apps/api/path';
+import { Box, Typography, Button, List, ListItem, ListItemText } from '@mui/material';
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+const CONFIG_FILE_NAME = 'audio_devices.json';
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+function App() {
+  const [currentAudioDevice, setCurrentAudioDevice] = useState('加载中...');
+  const [configuredAudioDevices, setConfiguredAudioDevices] = useState<string[]>([]);
+
+  useEffect(() => {
+    loadCurrentAudioDevice();
+    loadConfiguredAudioDevices();
+  }, []);
+
+  const getConfigFile = async () => {
+    const appDataDirPath = await appDataDir();
+    return `${appDataDirPath}${CONFIG_FILE_NAME}`;
+  };
+
+  const loadCurrentAudioDevice = async () => {
+    try {
+      const device = await invoke('get_current_audio_device');
+      setCurrentAudioDevice(device as string);
+    } catch (error) {
+      console.error('Failed to get current audio device:', error);
+      setCurrentAudioDevice('获取失败');
+    }
+  };
+
+  const loadConfiguredAudioDevices = async () => {
+    try {
+      const configFilePath = await getConfigFile();
+      if (await exists(configFilePath, { baseDir: BaseDirectory.AppData })) {
+        const contents = await readTextFile(configFilePath);
+        setConfiguredAudioDevices(JSON.parse(contents));
+      }
+    } catch (error) {
+      console.error('Failed to load configured audio devices:', error);
+    }
+  };
+
+  const handleSwitchDevice = async (deviceName: string) => {
+    try {
+      await invoke('set_audio_device', { deviceName });
+      setCurrentAudioDevice(deviceName); // 假设切换成功后更新当前设备
+      console.log(`Switched to device: ${deviceName}`);
+    } catch (error) {
+      console.error('Failed to switch audio device:', error);
+    }
+  };
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <Box mt={4}>
+        <Typography variant="h6" gutterBottom>
+          当前音频输出设备: {currentAudioDevice}
+        </Typography>
+        <Typography variant="h6" gutterBottom>
+          快速切换音频设备
+        </Typography>
+        <List>
+          {configuredAudioDevices.map((device, index) => (
+            <ListItem key={index} onClick={() => handleSwitchDevice(device)} sx={{ cursor: 'pointer' }}>
+              <ListItemText primary={device} />
+            </ListItem>
+          ))}
+        </List>
+      </Box>
     </main>
   );
 }
