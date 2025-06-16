@@ -1,54 +1,53 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { appDataDir } from '@tauri-apps/api/path';
-import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
-import { BaseDirectory } from '@tauri-apps/api/path';
-import { Box, Typography, Button, List, ListItem, ListItemText } from '@mui/material';
+import { Box, Typography, List, ListItem, ListItemText, Chip } from '@mui/material';
 import "./App.css";
 
-const CONFIG_FILE_NAME = 'audio_devices.json';
+interface AudioDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
+}
 
 function App() {
-  const [currentAudioDevice, setCurrentAudioDevice] = useState('加载中...');
-  const [configuredAudioDevices, setConfiguredAudioDevices] = useState<string[]>([]);
+  const [currentAudioDevice, setCurrentAudioDevice] = useState<AudioDevice | null>(null);
+  const [allAudioDevices, setAllAudioDevices] = useState<AudioDevice[]>([]);
 
   useEffect(() => {
     loadCurrentAudioDevice();
-    loadConfiguredAudioDevices();
+    loadAllAudioDevices();
   }, []);
-
-  const getConfigFile = async () => {
-    const appDataDirPath = await appDataDir();
-    return `${appDataDirPath}${CONFIG_FILE_NAME}`;
-  };
 
   const loadCurrentAudioDevice = async () => {
     try {
+      console.log('Calling get_current_audio_device...');
       const device = await invoke('get_current_audio_device');
-      setCurrentAudioDevice(device as string);
+      console.log('Current device response:', device);
+      setCurrentAudioDevice(device as AudioDevice);
     } catch (error) {
       console.error('Failed to get current audio device:', error);
-      setCurrentAudioDevice('获取失败');
+      setCurrentAudioDevice(null);
     }
   };
 
-  const loadConfiguredAudioDevices = async () => {
+  const loadAllAudioDevices = async () => {
     try {
-      const configFilePath = await getConfigFile();
-      if (await exists(configFilePath, { baseDir: BaseDirectory.AppData })) {
-        const contents = await readTextFile(configFilePath);
-        setConfiguredAudioDevices(JSON.parse(contents));
-      }
+      console.log('Calling get_audio_output_devices...');
+      const devices = await invoke('get_audio_output_devices');
+      console.log('All devices response:', devices);
+      setAllAudioDevices(devices as AudioDevice[]);
     } catch (error) {
-      console.error('Failed to load configured audio devices:', error);
+      console.error('Failed to get audio devices:', error);
+      setAllAudioDevices([]);
     }
   };
 
-  const handleSwitchDevice = async (deviceName: string) => {
+  const handleSwitchDevice = async (device: AudioDevice) => {
     try {
-      await invoke('set_audio_device', { deviceName });
-      setCurrentAudioDevice(deviceName); // 假设切换成功后更新当前设备
-      console.log(`Switched to device: ${deviceName}`);
+      await invoke('set_audio_device', { deviceId: device.id });
+      // 重新加载当前设备信息
+      await loadCurrentAudioDevice();
+      console.log(`Switched to device: ${device.name}`);
     } catch (error) {
       console.error('Failed to switch audio device:', error);
     }
@@ -58,15 +57,30 @@ function App() {
     <main className="container">
       <Box mt={4}>
         <Typography variant="h6" gutterBottom>
-          当前音频输出设备: {currentAudioDevice}
+          当前音频输出设备: {currentAudioDevice ? currentAudioDevice.name : '加载中...'}
+          {currentAudioDevice?.is_default && <Chip label="默认" size="small" color="primary" sx={{ ml: 1 }} />}
         </Typography>
         <Typography variant="h6" gutterBottom>
-          快速切换音频设备
+          所有音频设备
         </Typography>
         <List>
-          {configuredAudioDevices.map((device, index) => (
-            <ListItem key={index} onClick={() => handleSwitchDevice(device)} sx={{ cursor: 'pointer' }}>
-              <ListItemText primary={device} />
+          {allAudioDevices.map((device) => (
+            <ListItem
+              key={device.id}
+              onClick={() => handleSwitchDevice(device)}
+              sx={{
+                cursor: 'pointer',
+                backgroundColor: device.is_default ? 'rgba(25, 118, 210, 0.08)' : 'transparent',
+                '&:hover': {
+                  backgroundColor: 'rgba(0, 0, 0, 0.04)'
+                }
+              }}
+            >
+              <ListItemText
+                primary={device.name}
+                secondary={device.id}
+              />
+              {device.is_default && <Chip label="当前默认" size="small" color="primary" />}
             </ListItem>
           ))}
         </List>

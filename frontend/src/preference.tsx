@@ -6,7 +6,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir, join } from '@tauri-apps/api/path';
-import { readTextFile, writeTextFile, exists, create } from '@tauri-apps/plugin-fs';
+import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
 import { BaseDirectory } from '@tauri-apps/api/path'; // BaseDirectory 可能在 @tauri-apps/api/path 中
 import './App.css'; // 可以复用主应用的 CSS，或者创建新的 CSS 文件
 
@@ -16,9 +16,15 @@ const theme = createTheme({
 
 const CONFIG_FILE_NAME = 'audio_devices.json';
 
+interface AudioDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
+}
+
 function PreferenceApp() {
   const [configuredAudioDevices, setConfiguredAudioDevices] = useState<string[]>([]);
-  const [availableAudioDevices, setAvailableAudioDevices] = useState<string[]>([]);
+  const [availableAudioDevices, setAvailableAudioDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceToAdd, setSelectedDeviceToAdd] = useState('');
 
   useEffect(() => {
@@ -55,7 +61,7 @@ function PreferenceApp() {
   const loadAvailableAudioDevices = async () => {
     try {
       const devices = await invoke('get_audio_output_devices');
-      setAvailableAudioDevices(devices as string[]);
+      setAvailableAudioDevices(devices as AudioDevice[]);
       console.log('Available devices:', devices);
     } catch (error) {
       console.error('Failed to get available audio devices:', error);
@@ -78,8 +84,9 @@ function PreferenceApp() {
   };
 
   const handleAddDevice = () => {
-    if (selectedDeviceToAdd && configuredAudioDevices.length < 4 && !configuredAudioDevices.includes(selectedDeviceToAdd)) {
-      const updatedDevices = [...configuredAudioDevices, selectedDeviceToAdd];
+    const selectedDevice = availableAudioDevices.find(device => device.id === selectedDeviceToAdd);
+    if (selectedDevice && configuredAudioDevices.length < 4 && !configuredAudioDevices.includes(selectedDevice.name)) {
+      const updatedDevices = [...configuredAudioDevices, selectedDevice.name];
       saveConfiguredAudioDevices(updatedDevices);
       setSelectedDeviceToAdd('');
     }
@@ -92,8 +99,14 @@ function PreferenceApp() {
 
   const handleSwitchDevice = async (deviceName: string) => {
     try {
-      await invoke('set_audio_device', { deviceName });
-      console.log(`Switched to device: ${deviceName}`);
+      // 根据设备名称找到对应的设备 ID
+      const device = availableAudioDevices.find(d => d.name === deviceName);
+      if (device) {
+        await invoke('set_audio_device', { deviceId: device.id });
+        console.log(`Switched to device: ${deviceName}`);
+      } else {
+        console.error('Device not found:', deviceName);
+      }
     } catch (error) {
       console.error('Failed to switch audio device:', error);
     }
@@ -136,8 +149,8 @@ function PreferenceApp() {
               sx={{ mb: 1 }}
             >
               {availableAudioDevices.map((device) => (
-                <MenuItem key={device} value={device}>
-                  {device}
+                <MenuItem key={device.id} value={device.id}>
+                  {device.name}
                 </MenuItem>
               ))}
             </TextField>

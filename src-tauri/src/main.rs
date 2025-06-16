@@ -1,49 +1,172 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use cpal::traits::{DeviceTrait, HostTrait};
+// use cpal::traits::{DeviceTrait, HostTrait};
 use tauri::{
     Manager,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };
+// use wasapi::{DeviceCollection, Direction, get_default_device_for_role, Role};
+use com_policy_config::{IPolicyConfig, PolicyConfigClient};
+use windows::{
+    core::{PCWSTR, Result as WindowsResult},
+    Win32::{
+        Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
+        Media::Audio::{DEVICE_STATE_ACTIVE, eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator},
+        System::Com::{CLSCTX_ALL, CoCreateInstance, COINIT_MULTITHREADED, CoInitializeEx, STGM_READ},
+    },
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AudioDevice {
+    id: String,
+    name: String,
+    is_default: bool,
+}
 
 // 定义一个 Tauri 命令，用于设置音频设备
 #[tauri::command]
-fn set_audio_device(device_name: String) {
-    let host = cpal::default_host();
-    if let Some(_device) = host
-        .output_devices()
-        .unwrap()
-        .find(|d| d.name().unwrap() == device_name)
-    {
-        println!("尝试切换到音频设备: {}", device_name);
-        // cpal 0.15 不直接提供设置默认设备的功能
-        // 实际的切换可能需要更底层的操作系统API或用户手动操作
-        // 这里只是打印信息，表示尝试切换
-    } else {
-        println!("未找到音频设备: {}", device_name);
+fn set_audio_device(device_id: String) -> Result<String, String> {
+    unsafe {
+        // 尝试初始化 COM，如果已经初始化则忽略错误
+        let _com_result = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // 不检查错误，因为 COM 可能已经被 Tauri 初始化了
+
+        let result = (|| -> WindowsResult<String> {
+            // 创建设备枚举器
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+
+            // 获取设备集合
+            let device_collection = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)?;
+            let device_count = device_collection.GetCount()?;
+
+            // 查找目标设备
+            let mut target_device = None;
+            for i in 0..device_count {
+                let device = device_collection.Item(i)?;
+                let current_device_id = device.GetId()?;
+                let current_device_id_str = current_device_id.to_string()?;
+
+                if current_device_id_str == device_id {
+                    target_device = Some(device);
+                    break;
+                }
+            }
+
+            let device = target_device.ok_or_else(|| {
+                windows::core::Error::from(windows::Win32::Foundation::E_INVALIDARG)
+            })?;
+
+            // 获取设备名称用于日志
+            let property_store = device.OpenPropertyStore(STGM_READ)?;
+            let name_prop = property_store.GetValue(&PKEY_Device_FriendlyName)?;
+            let device_name = name_prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string()?;
+
+            // 创建 PolicyConfig 实例来设置默认设备
+            let policy_config: IPolicyConfig = CoCreateInstance(&PolicyConfigClient, None, CLSCTX_ALL)?;
+            let device_id_pcwstr = PCWSTR(device.GetId()?.0);
+
+            // 设置为默认设备（Console 角色用于大多数应用程序）
+            policy_config.SetDefaultEndpoint(device_id_pcwstr, eConsole)?;
+
+            Ok(format!("成功切换到音频设备: {}", device_name))
+        })();
+
+        // 不调用 CoUninitialize，因为 COM 可能被 Tauri 管理
+
+        match result {
+            Ok(msg) => {
+                println!("{}", msg);
+                Ok(msg)
+            }
+            Err(e) => {
+                let error_msg = format!("切换音频设备失败: {:?}", e);
+                println!("{}", error_msg);
+                Err(error_msg)
+            }
+        }
     }
 }
 
 // 定义一个 Tauri 命令，用于获取当前音频设备
 #[tauri::command]
-fn get_current_audio_device() -> String {
-    let host = cpal::default_host();
-    if let Some(device) = host.default_output_device() {
-        device.name().unwrap_or_else(|_| "未知设备".to_string())
-    } else {
-        "无可用设备".to_string()
+fn get_current_audio_device() -> Option<AudioDevice> {
+    println!("get_current_audio_device called");
+    unsafe {
+        // 尝试初始化 COM，如果已经初始化则忽略错误
+        let _com_result = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // 不检查错误，因为 COM 可能已经被 Tauri 初始化了
+
+        let result = (|| -> WindowsResult<AudioDevice> {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
+            let device_id = device.GetId()?.to_string()?;
+
+            let property_store = device.OpenPropertyStore(STGM_READ)?;
+            let name_prop = property_store.GetValue(&PKEY_Device_FriendlyName)?;
+            let device_name = name_prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string()?;
+
+            Ok(AudioDevice {
+                id: device_id,
+                name: device_name,
+                is_default: true,
+            })
+        })();
+
+        // 不调用 CoUninitialize，因为 COM 可能被 Tauri 管理
+
+        result.ok()
     }
 }
 
 // 定义一个 Tauri 命令，用于获取所有可用的音频输出设备列表
 #[tauri::command]
-fn get_audio_output_devices() -> Vec<String> {
-    let host = cpal::default_host();
-    match host.output_devices() {
-        Ok(devices) => devices.filter_map(|device| device.name().ok()).collect(),
-        Err(_) => Vec::new(),
+fn get_audio_output_devices() -> Vec<AudioDevice> {
+    println!("get_audio_output_devices called");
+    unsafe {
+        // 尝试初始化 COM，如果已经初始化则忽略错误
+        let _com_result = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // 不检查错误，因为 COM 可能已经被 Tauri 初始化了
+
+        let result = (|| -> WindowsResult<Vec<AudioDevice>> {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device_collection = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)?;
+            let device_count = device_collection.GetCount()?;
+
+            // 获取默认设备
+            let default_device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
+            let default_device_id = default_device.GetId()?.to_string()?;
+
+            let mut devices = Vec::new();
+
+            for i in 0..device_count {
+                let device = device_collection.Item(i)?;
+                let device_id = device.GetId()?.to_string()?;
+
+                let property_store = device.OpenPropertyStore(STGM_READ)?;
+                let name_prop = property_store.GetValue(&PKEY_Device_FriendlyName)?;
+                let device_name = name_prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string()?;
+
+                let is_default = device_id == default_device_id;
+
+                devices.push(AudioDevice {
+                    id: device_id,
+                    name: device_name,
+                    is_default,
+                });
+            }
+
+            Ok(devices)
+        })();
+
+        // 不调用 CoUninitialize，因为 COM 可能被 Tauri 管理
+
+        match result {
+            Ok(devices) => devices,
+            Err(_) => Vec::new(),
+        }
     }
 }
 
