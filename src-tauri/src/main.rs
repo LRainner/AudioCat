@@ -98,6 +98,17 @@ fn main() {
                 .build(app)?;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // 阻止默认的关闭行为
+                    api.prevent_close();
+                    // 隐藏窗口而不是关闭
+                    window.hide().unwrap();
+                }
+                _ => {}
+            }
+        })
         .plugin(tauri_plugin_fs::init()) // 初始化文件系统插件
         .invoke_handler(tauri::generate_handler![
             set_audio_device,
