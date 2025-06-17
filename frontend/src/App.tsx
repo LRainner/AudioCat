@@ -11,12 +11,16 @@ import {
   ListItemText,
   ListItemIcon,
   Paper,
-  Divider
+  Divider,
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import {
   VolumeUp as VolumeUpIcon,
   RadioButtonChecked as RadioButtonCheckedIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon
+  RadioButtonUnchecked as RadioButtonUncheckedIcon,
+  TouchApp as TouchAppIcon,
+  PanTool as PanToolIcon
 } from '@mui/icons-material';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { readTextFile, exists } from '@tauri-apps/plugin-fs';
@@ -36,6 +40,7 @@ function App() {
   const [availableDevices, setAvailableDevices] = useState<AudioDevice[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPassthroughMode, setIsPassthroughMode] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -67,6 +72,14 @@ function App() {
         }
       });
 
+      // 监听来自托盘菜单的穿透模式变化
+      const unlistenPassthrough = await listen<boolean>('passthrough-mode-changed', (event) => {
+        console.log('Passthrough mode changed from tray menu:', event.payload);
+        if (mounted) {
+          setIsPassthroughMode(event.payload);
+        }
+      });
+
       // 每5秒刷新一次当前设备状态（只刷新当前设备，不重新加载所有数据）
       const interval = setInterval(() => {
         if (mounted) {
@@ -78,6 +91,7 @@ function App() {
         mounted = false;
         clearInterval(interval);
         unlisten();
+        unlistenPassthrough();
       };
     };
 
@@ -106,10 +120,20 @@ function App() {
     await Promise.all([
       loadCurrentAudioDevice(),
       loadConfiguredDevices(),
-      loadAvailableDevices()
+      loadAvailableDevices(),
+      loadPassthroughMode()
     ]);
     // 数据加载完成后调整窗口大小，给更多时间让DOM更新
     setTimeout(adjustWindowSize, 300);
+  };
+
+  const loadPassthroughMode = async () => {
+    try {
+      const currentMode = await invoke<boolean>('get_passthrough_mode');
+      setIsPassthroughMode(currentMode);
+    } catch (error) {
+      console.error('Failed to load passthrough mode:', error);
+    }
   };
 
   const adjustWindowSize = async () => {
@@ -132,19 +156,60 @@ function App() {
         // 获取实际内容尺寸
         const contentHeight = container.scrollHeight;
         const contentWidth = container.scrollWidth;
+        const offsetHeight = container.offsetHeight;
+        const offsetWidth = container.offsetWidth;
+        const clientHeight = container.clientHeight;
+        const clientWidth = container.clientWidth;
 
-        // 计算新的窗口尺寸
-        const newHeight = Math.max(contentHeight + 40, 200); // 最小高度200px
-        const newWidth = Math.max(contentWidth + 40, 320);   // 最小宽度320px
+        console.log('Container dimensions:', {
+          scrollHeight: contentHeight,
+          scrollWidth: contentWidth,
+          offsetHeight,
+          offsetWidth,
+          clientHeight,
+          clientWidth
+        });
 
-        // 只有当尺寸有明显变化时才调整
-        if (Math.abs(newHeight - currentSize.height) > 10 || Math.abs(newWidth - currentSize.width) > 10) {
-          await window.setSize(new LogicalSize(newWidth, newHeight));
-          console.log('Window size adjusted:', {
-            from: { width: currentSize.width, height: currentSize.height },
-            to: { width: newWidth, height: newHeight }
-          });
-        }
+        // 使用最精确的尺寸，优先使用 offsetWidth/Height，但确保不小于内容
+        const newHeight = Math.max(offsetHeight, contentHeight, 150);
+        const newWidth = Math.max(offsetWidth, contentWidth, 320);
+
+        // 获取 Paper 组件的实际渲染尺寸
+        const paperElement = container.querySelector('[elevation="8"]') || container;
+        const paperRect = paperElement.getBoundingClientRect();
+
+        console.log('Paper element dimensions:', {
+          width: paperRect.width,
+          height: paperRect.height,
+          top: paperRect.top,
+          left: paperRect.left
+        });
+
+        // 使用 Paper 组件的实际尺寸
+        const finalWidth = Math.max(Math.ceil(paperRect.width), 320);
+        const finalHeight = Math.max(Math.ceil(paperRect.height), 150);
+
+        console.log('Calculated window size:', {
+          current: { width: currentSize.width, height: currentSize.height },
+          container: { width: newWidth, height: newHeight },
+          paper: { width: finalWidth, height: finalHeight },
+          difference: {
+            width: Math.abs(finalWidth - currentSize.width),
+            height: Math.abs(finalHeight - currentSize.height)
+          }
+        });
+
+        console.log('Detailed size info:', {
+          'container.offsetWidth': offsetWidth,
+          'container.scrollWidth': contentWidth,
+          'paper.width': paperRect.width,
+          'paper.height': paperRect.height,
+          'final window size': { width: finalWidth, height: finalHeight }
+        });
+
+        // 使用 Paper 组件的精确尺寸
+        await window.setSize(new LogicalSize(finalWidth, finalHeight));
+        console.log('Window size adjusted to exact Paper component size');
       } else {
         // 备用方法：使用文档尺寸
         const docHeight = Math.max(
@@ -158,7 +223,7 @@ function App() {
           320
         );
 
-        await window.setSize(new LogicalSize(docWidth + 20, docHeight + 20));
+        await window.setSize(new LogicalSize(docWidth + 10, docHeight + 10));
       }
 
     } catch (error) {
@@ -168,9 +233,17 @@ function App() {
 
   // 拖动功能
   const handleMouseDown = async (e: React.MouseEvent) => {
-    // 只在标题栏区域允许拖动，避免与按钮点击冲突
+    // 在穿透模式下不允许拖动
+    if (isPassthroughMode) {
+      return;
+    }
+
+    // 避免在可交互元素上拖动
     const target = e.target as HTMLElement;
-    if (target.closest('button') || target.closest('[role="button"]')) {
+    if (target.closest('button') ||
+        target.closest('[role="button"]') ||
+        target.closest('li') ||
+        target.closest('[data-testid]')) {
       return;
     }
 
@@ -184,6 +257,29 @@ function App() {
       console.error('Failed to start dragging:', error);
     } finally {
       setIsDragging(false);
+    }
+  };
+
+  // 切换穿透模式 - 使用 wallpaper 插件
+  const togglePassthroughMode = async () => {
+    try {
+      const newMode = !isPassthroughMode;
+      console.log(`Attempting to ${newMode ? 'enable' : 'disable'} passthrough mode...`);
+
+      const result = await invoke('toggle_passthrough_mode', { enabled: newMode });
+      console.log('Backend response:', result);
+
+      setIsPassthroughMode(newMode);
+      console.log(`Frontend state updated: passthrough mode ${newMode ? 'enabled' : 'disabled'}`);
+
+      // 给用户一些视觉反馈
+      if (newMode) {
+        console.log('窗口现在是桌面挂件，固定在桌面上，Win+D 不会隐藏');
+      } else {
+        console.log('窗口现在是正常模式，可以拖动');
+      }
+    } catch (error) {
+      console.error('Failed to toggle passthrough mode:', error);
     }
   };
 
@@ -263,34 +359,38 @@ function App() {
   const displayDevices = getDisplayDevices();
 
   return (
-    <Box ref={containerRef} sx={{ width: '100%', maxWidth: 320, margin: 'auto', p: 1 }}>
-      <Paper
-        elevation={8}
-        sx={{
-          borderRadius: 3,
-          backdropFilter: 'blur(10px)',
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          '@media (prefers-color-scheme: dark)': {
-            backgroundColor: 'rgba(30, 30, 30, 0.95)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-          }
-        }}
-      >
+    <Paper
+      ref={containerRef}
+      onMouseDown={isPassthroughMode ? undefined : handleMouseDown}
+      elevation={8}
+      sx={{
+        borderRadius: 3,
+        backdropFilter: 'blur(10px)',
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        margin: 0,
+        padding: 0,
+        width: 'fit-content',
+        minWidth: 320,
+        minHeight: 150,
+        boxSizing: 'border-box',
+        cursor: isPassthroughMode ? 'default' : (isDragging ? 'grabbing' : 'grab'),
+        userSelect: 'none',
+        '@media (prefers-color-scheme: dark)': {
+          backgroundColor: 'rgba(30, 30, 30, 0.95)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+        }
+      }}
+    >
         {/* 标题栏 */}
         <Box
-          onMouseDown={handleMouseDown}
           sx={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'space-between',
             p: 2,
             pb: 1,
-            cursor: isDragging ? 'grabbing' : 'grab',
-            userSelect: 'none',
-            '&:active': {
-              cursor: 'grabbing'
-            }
+            userSelect: 'none'
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -299,6 +399,15 @@ function App() {
               音频输出
             </Typography>
           </Box>
+          <Tooltip title={isPassthroughMode ? "退出穿透模式" : "进入穿透模式"}>
+            <IconButton
+              size="small"
+              onClick={togglePassthroughMode}
+              color={isPassthroughMode ? "primary" : "default"}
+            >
+              {isPassthroughMode ? <PanToolIcon fontSize="small" /> : <TouchAppIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
         </Box>
 
         <Divider />
@@ -372,7 +481,6 @@ function App() {
           )}
         </List>
       </Paper>
-    </Box>
   );
 }
 

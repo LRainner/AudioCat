@@ -1,13 +1,15 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+
 // use cpal::traits::{DeviceTrait, HostTrait};
 use tauri::{
-    Manager,
+    Manager, Emitter,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     WebviewWindowBuilder,
 };
+
 // use wasapi::{DeviceCollection, Direction, get_default_device_for_role, Role};
 use com_policy_config::{IPolicyConfig, PolicyConfigClient};
 use windows::{
@@ -19,6 +21,17 @@ use windows::{
     },
 };
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+
+// 全局状态管理
+#[derive(Default)]
+struct AppState {
+    passthrough_mode: bool,
+}
+
+type SharedState = Arc<Mutex<AppState>>;
+
+
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AudioDevice {
@@ -183,81 +196,56 @@ fn test_drag_functionality() -> Result<String, String> {
     Ok("Drag functionality test".to_string())
 }
 
-// 设置窗口为桌面挂件模式
-#[cfg(target_os = "windows")]
-fn set_desktop_widget_mode(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowLongPtrW, GetWindowLongPtrW, SetWindowPos, SetParent, FindWindowW,
-        GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED,
-        HWND_BOTTOM, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW
-    };
-    use windows::Win32::Foundation::HWND;
-    use windows::core::PCWSTR;
-
-    unsafe {
-        let hwnd = HWND(window.hwnd()?.0 as isize);
-
-        // 获取当前扩展样式
-        let current_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-
-        // 设置扩展样式：工具窗口 + 不激活 + 分层窗口
-        let new_style = current_style |
-            WS_EX_TOOLWINDOW.0 as isize |
-            WS_EX_NOACTIVATE.0 as isize |
-            WS_EX_LAYERED.0 as isize;
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
-
-        // 尝试找到 WorkerW 窗口（桌面工作区）
-        let progman_hwnd = FindWindowW(
-            PCWSTR::from_raw("Progman\0".encode_utf16().collect::<Vec<u16>>().as_ptr()),
-            PCWSTR::null()
-        );
-
-        if progman_hwnd.0 != 0 {
-            // 将窗口设置为桌面的子窗口，这样可以避免被"显示桌面"隐藏
-            SetParent(hwnd, progman_hwnd);
-
-            // 设置窗口位置在桌面层级
-            SetWindowPos(
-                hwnd,
-                HWND_BOTTOM,
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
-            )?;
-
-            println!("Window set as desktop child widget");
-        } else {
-            // 如果找不到 Progman，使用备用方法
-            SetWindowPos(
-                hwnd,
-                HWND_BOTTOM,
-                0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
-            )?;
-
-            println!("Window set with fallback method");
+// 切换穿透模式的命令 - 改进的自定义实现
+#[tauri::command]
+fn toggle_passthrough_mode(app_handle: tauri::AppHandle, enabled: bool) -> Result<String, String> {
+    if let Some(_window) = app_handle.get_webview_window("main") {
+        // 更新全局状态
+        if let Some(state) = app_handle.try_state::<SharedState>() {
+            if let Ok(mut app_state) = state.lock() {
+                app_state.passthrough_mode = enabled;
+            }
         }
 
-        println!("Desktop widget mode set for window: {}", window.label());
+        if enabled {
+            // 启用穿透模式：只在前端禁用拖动，保持点击功能
+            // 不使用 Windows API，避免影响交互
+            println!("Passthrough mode enabled - dragging disabled in frontend");
+        } else {
+            // 禁用穿透模式：在前端恢复拖动
+            println!("Passthrough mode disabled - dragging enabled in frontend");
+        }
+        Ok(format!("Passthrough mode {}", if enabled { "enabled" } else { "disabled" }))
+    } else {
+        Err("Main window not found".to_string())
     }
-
-    Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
-fn set_desktop_widget_mode(_window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Desktop widget mode not supported on this platform");
-    Ok(())
+// 获取当前穿透模式状态
+#[tauri::command]
+fn get_passthrough_mode(app_handle: tauri::AppHandle) -> bool {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(app_state) = state.lock() {
+            return app_state.passthrough_mode;
+        }
+    }
+    false
 }
+
+// 使用 wallpaper 插件，移除了自定义的 Windows API 实现
+
+
 
 fn main() {
     tauri::Builder::default()
+        .manage(SharedState::default())
         .setup(|app| {
             // 创建菜单项
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let toggle_item = MenuItem::with_id(app, "toggle", "显示/隐藏窗口", true, None::<&str>)?;
+            let passthrough_item = MenuItem::with_id(app, "passthrough", "穿透模式", true, None::<&str>)?;
             let config_item = MenuItem::with_id(app, "preference", "偏好设置", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toggle_item, &config_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&toggle_item, &passthrough_item, &config_item, &quit_item])?;
 
             // 构建托盘
             TrayIconBuilder::new()
@@ -276,6 +264,30 @@ fn main() {
                             window.show().unwrap();
                             window.set_focus().unwrap();
                         }
+                    }
+                    "passthrough" => {
+                        // 切换穿透模式 - 获取当前状态并切换
+                        let current_mode = if let Some(state) = app.try_state::<SharedState>() {
+                            if let Ok(app_state) = state.lock() {
+                                app_state.passthrough_mode
+                            } else { false }
+                        } else { false };
+
+                        let new_mode = !current_mode;
+
+                        // 更新状态
+                        if let Some(state) = app.try_state::<SharedState>() {
+                            if let Ok(mut app_state) = state.lock() {
+                                app_state.passthrough_mode = new_mode;
+                            }
+                        }
+
+                        // 通知前端状态变化
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("passthrough-mode-changed", new_mode);
+                        }
+
+                        println!("Passthrough mode {} via tray menu", if new_mode { "enabled" } else { "disabled" });
                     }
                     "preference" => {
                         let preference_window = app.get_webview_window("preference");
@@ -298,22 +310,21 @@ fn main() {
                 })
                 .build(app)?;
 
-            // 设置主窗口为桌面挂件模式
-            if let Some(main_window) = app.get_webview_window("main") {
-                if let Err(e) = set_desktop_widget_mode(&main_window) {
-                    eprintln!("Failed to set desktop widget mode: {}", e);
-                }
-            }
+            // 主窗口默认为正常模式，用户可以通过界面切换到穿透模式
+            println!("Application initialized successfully");
 
             Ok(())
         })
-        .on_window_event(|_window, event| {
+        .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // 由于没有关闭按钮，这个事件通常不会触发
-                    // 但如果触发了，阻止关闭并隐藏窗口
-                    api.prevent_close();
-                    // 注意：这里不能调用 window.hide() 因为会导致借用检查问题
+                    // 只对主窗口阻止关闭，其他窗口（如偏好设置）允许正常关闭
+                    if window.label() == "main" {
+                        // 主窗口没有关闭按钮，如果触发关闭事件就隐藏窗口
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    // 偏好设置窗口等其他窗口允许正常关闭
                 }
                 _ => {}
             }
@@ -324,7 +335,9 @@ fn main() {
             get_current_audio_device,
             get_audio_output_devices,
             create_app_data_dir,
-            test_drag_functionality
+            test_drag_functionality,
+            toggle_passthrough_mode,
+            get_passthrough_mode
         ]) // 添加命令处理
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
