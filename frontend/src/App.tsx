@@ -11,12 +11,15 @@ import {
   ListItemText,
   ListItemIcon,
   Paper,
-  Divider
+  Divider,
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import {
   VolumeUp as VolumeUpIcon,
   RadioButtonChecked as RadioButtonCheckedIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon
+  RadioButtonUnchecked as RadioButtonUncheckedIcon,
+  AspectRatio as AspectRatioIcon
 } from '@mui/icons-material';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { readTextFile, exists } from '@tauri-apps/plugin-fs';
@@ -63,9 +66,15 @@ function App() {
   // 当配置设备列表变化时，调整窗口大小
   useEffect(() => {
     if (configuredDevices.length >= 0) { // 确保已经加载了配置
-      setTimeout(adjustWindowSize, 100);
+      setTimeout(adjustWindowSize, 300);
     }
   }, [configuredDevices]);
+
+  // 组件挂载后也调整一次窗口大小
+  useEffect(() => {
+    const timer = setTimeout(adjustWindowSize, 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const loadData = async () => {
     await Promise.all([
@@ -73,41 +82,51 @@ function App() {
       loadConfiguredDevices(),
       loadAvailableDevices()
     ]);
-    // 数据加载完成后调整窗口大小
-    setTimeout(adjustWindowSize, 100);
+    // 数据加载完成后调整窗口大小，给更多时间让DOM更新
+    setTimeout(adjustWindowSize, 300);
   };
 
   const adjustWindowSize = async () => {
     try {
-      if (!containerRef.current) return;
-
       const window = getCurrentWebviewWindow();
-      const container = containerRef.current;
 
-      // 获取容器的实际尺寸
-      const rect = container.getBoundingClientRect();
-      const computedStyle = globalThis.getComputedStyle(container);
+      // 等待一小段时间确保DOM完全渲染
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-      // 计算所需的窗口尺寸（包括边距和填充）
-      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
-      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
-      const marginTop = parseFloat(computedStyle.marginTop) || 0;
-      const marginBottom = parseFloat(computedStyle.marginBottom) || 0;
+      // 获取整个文档的尺寸
+      const documentHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.documentElement.offsetHeight,
+        document.body.scrollHeight,
+        document.body.offsetHeight
+      );
 
-      const contentHeight = rect.height;
-      const totalHeight = contentHeight + paddingTop + paddingBottom + marginTop + marginBottom + 20; // 额外的20px缓冲
-      const totalWidth = Math.max(320, rect.width + 40); // 最小宽度320px，额外40px缓冲
+      const documentWidth = Math.max(
+        document.documentElement.scrollWidth,
+        document.documentElement.offsetWidth,
+        document.body.scrollWidth,
+        document.body.offsetWidth,
+        320 // 最小宽度
+      );
 
-      console.log('Container dimensions:', {
-        rect: { width: rect.width, height: rect.height },
-        padding: { top: paddingTop, bottom: paddingBottom },
-        margin: { top: marginTop, bottom: marginBottom },
-        calculated: { width: totalWidth, height: totalHeight }
+      console.log('Document dimensions:', {
+        height: documentHeight,
+        width: documentWidth,
+        scrollHeight: document.documentElement.scrollHeight,
+        offsetHeight: document.documentElement.offsetHeight,
+        bodyScrollHeight: document.body.scrollHeight,
+        bodyOffsetHeight: document.body.offsetHeight
       });
 
+      // 计算窗口尺寸（添加一些缓冲）
+      const windowHeight = Math.min(documentHeight + 20, 800); // 最大高度800px
+      const windowWidth = Math.min(documentWidth + 20, 500);   // 最大宽度500px
+
+      console.log('Setting window size to:', { width: windowWidth, height: windowHeight });
+
       // 调整窗口大小
-      await window.setSize(new LogicalSize(Math.round(totalWidth), Math.round(totalHeight)));
-      console.log('Window size adjusted to:', { width: Math.round(totalWidth), height: Math.round(totalHeight) });
+      await window.setSize(new LogicalSize(windowWidth, windowHeight));
+      console.log('Window size adjusted successfully');
     } catch (error) {
       console.error('Failed to adjust window size:', error);
     }
@@ -195,7 +214,7 @@ function App() {
         <Box sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
+          justifyContent: 'space-between',
           p: 2,
           pb: 1
         }}>
@@ -205,6 +224,11 @@ function App() {
               音频输出
             </Typography>
           </Box>
+          <Tooltip title="调整窗口大小">
+            <IconButton size="small" onClick={adjustWindowSize}>
+              <AspectRatioIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
 
         <Divider />
