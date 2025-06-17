@@ -13,10 +13,18 @@
     "windows": [
       {
         "label": "main",
-        "title": "tauri-demo",
-        "width": 800,
-        "height": 600,
-        "visible": false
+        "title": "音频输出切换器",
+        "width": 340,
+        "height": 400,
+        "minWidth": 320,
+        "minHeight": 200,
+        "maxWidth": 400,
+        "maxHeight": 600,
+        "resizable": true,
+        "visible": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
       },
       {
         "label": "preference",

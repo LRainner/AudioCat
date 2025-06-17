@@ -40,10 +40,13 @@ function PreferenceApp() {
 
   const loadConfiguredAudioDevices = async () => {
     try {
-      const configFilePath = await getConfigFile();
+      const appDataDirPath = await appDataDir();
+      const configFilePath = await join(appDataDirPath, CONFIG_FILE_NAME);
       console.log('Loading from:', configFilePath);
-      const fileExists = await exists(configFilePath, { baseDir: BaseDirectory.AppData });
+
+      const fileExists = await exists(configFilePath);
       console.log('Config file exists:', fileExists);
+
       if (fileExists) {
         const contents = await readTextFile(configFilePath);
         const parsedDevices = JSON.parse(contents);
@@ -70,12 +73,15 @@ function PreferenceApp() {
 
   const saveConfiguredAudioDevices = async (devices: string[]) => {
     try {
-      const configFilePath = await getConfigFile();
-      console.log('Saving to:', configFilePath);
-      // 确保父目录存在
       const appDataDirPath = await appDataDir();
-      await invoke('create_app_data_dir', { path: appDataDirPath }); // 调用 Rust 命令创建目录
-      await writeTextFile(configFilePath, JSON.stringify(devices), { baseDir: BaseDirectory.AppData });
+      console.log('App data dir:', appDataDirPath);
+      // 确保父目录存在
+      await invoke('create_app_data_dir', { path: appDataDirPath });
+
+      const configFilePath = await join(appDataDirPath, CONFIG_FILE_NAME);
+      console.log('Saving to:', configFilePath);
+
+      await writeTextFile(configFilePath, JSON.stringify(devices));
       setConfiguredAudioDevices(devices);
       console.log('Saved devices:', devices);
     } catch (error) {
@@ -158,7 +164,9 @@ function PreferenceApp() {
               variant="contained"
               startIcon={<AddIcon />}
               onClick={handleAddDevice}
-              disabled={!selectedDeviceToAdd || configuredAudioDevices.includes(selectedDeviceToAdd)}
+              disabled={!selectedDeviceToAdd || configuredAudioDevices.some(device =>
+                availableAudioDevices.find(d => d.id === selectedDeviceToAdd)?.name === device
+              )}
               fullWidth
             >
               添加
