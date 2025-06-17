@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import {
   Box,
   Typography,
@@ -32,6 +34,7 @@ function App() {
   const [currentAudioDevice, setCurrentAudioDevice] = useState<AudioDevice | null>(null);
   const [configuredDevices, setConfiguredDevices] = useState<string[]>([]);
   const [availableDevices, setAvailableDevices] = useState<AudioDevice[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadData();
@@ -57,12 +60,57 @@ function App() {
     };
   }, []);
 
+  // 当配置设备列表变化时，调整窗口大小
+  useEffect(() => {
+    if (configuredDevices.length >= 0) { // 确保已经加载了配置
+      setTimeout(adjustWindowSize, 100);
+    }
+  }, [configuredDevices]);
+
   const loadData = async () => {
     await Promise.all([
       loadCurrentAudioDevice(),
       loadConfiguredDevices(),
       loadAvailableDevices()
     ]);
+    // 数据加载完成后调整窗口大小
+    setTimeout(adjustWindowSize, 100);
+  };
+
+  const adjustWindowSize = async () => {
+    try {
+      if (!containerRef.current) return;
+
+      const window = getCurrentWebviewWindow();
+      const container = containerRef.current;
+
+      // 获取容器的实际尺寸
+      const rect = container.getBoundingClientRect();
+      const computedStyle = globalThis.getComputedStyle(container);
+
+      // 计算所需的窗口尺寸（包括边距和填充）
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
+      const marginTop = parseFloat(computedStyle.marginTop) || 0;
+      const marginBottom = parseFloat(computedStyle.marginBottom) || 0;
+
+      const contentHeight = rect.height;
+      const totalHeight = contentHeight + paddingTop + paddingBottom + marginTop + marginBottom + 20; // 额外的20px缓冲
+      const totalWidth = Math.max(320, rect.width + 40); // 最小宽度320px，额外40px缓冲
+
+      console.log('Container dimensions:', {
+        rect: { width: rect.width, height: rect.height },
+        padding: { top: paddingTop, bottom: paddingBottom },
+        margin: { top: marginTop, bottom: marginBottom },
+        calculated: { width: totalWidth, height: totalHeight }
+      });
+
+      // 调整窗口大小
+      await window.setSize(new LogicalSize(Math.round(totalWidth), Math.round(totalHeight)));
+      console.log('Window size adjusted to:', { width: Math.round(totalWidth), height: Math.round(totalHeight) });
+    } catch (error) {
+      console.error('Failed to adjust window size:', error);
+    }
   };
 
   const loadCurrentAudioDevice = async () => {
@@ -141,7 +189,7 @@ function App() {
   const displayDevices = getDisplayDevices();
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 320, margin: 'auto', p: 1 }}>
+    <Box ref={containerRef} sx={{ width: '100%', maxWidth: 320, margin: 'auto', p: 1 }}>
       <Paper elevation={2} sx={{ borderRadius: 2 }}>
         {/* 标题栏 */}
         <Box sx={{
