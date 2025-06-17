@@ -5,6 +5,7 @@ import { Box, Typography, TextField, Button, List, ListItem, ListItemText, IconB
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
 import { BaseDirectory } from '@tauri-apps/api/path'; // BaseDirectory 可能在 @tauri-apps/api/path 中
@@ -84,6 +85,10 @@ function PreferenceApp() {
       await writeTextFile(configFilePath, JSON.stringify(devices));
       setConfiguredAudioDevices(devices);
       console.log('Saved devices:', devices);
+
+      // 发送配置更新事件通知主窗口
+      await emit('config-updated', { devices });
+      console.log('Emitted config-updated event');
     } catch (error) {
       console.error('Failed to save configured audio devices:', error);
     }

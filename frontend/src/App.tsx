@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   Box,
   Typography,
@@ -8,19 +9,15 @@ import {
   ListItemText,
   ListItemIcon,
   Paper,
-  Divider,
-  IconButton,
-  Tooltip
+  Divider
 } from '@mui/material';
 import {
   VolumeUp as VolumeUpIcon,
   RadioButtonChecked as RadioButtonCheckedIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon,
-  Refresh as RefreshIcon
+  RadioButtonUnchecked as RadioButtonUncheckedIcon
 } from '@mui/icons-material';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { readTextFile, exists } from '@tauri-apps/plugin-fs';
-import { BaseDirectory } from '@tauri-apps/api/path';
 import "./App.css";
 
 const CONFIG_FILE_NAME = 'audio_devices.json';
@@ -38,9 +35,26 @@ function App() {
 
   useEffect(() => {
     loadData();
+
+    // 监听配置更新事件
+    const setupEventListener = async () => {
+      const unlisten = await listen('config-updated', (event) => {
+        console.log('Received config-updated event, refreshing...', event.payload);
+        loadData();
+      });
+
+      return unlisten;
+    };
+
+    let unlistenPromise = setupEventListener();
+
     // 每5秒刷新一次当前设备状态
     const interval = setInterval(loadCurrentAudioDevice, 5000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+      unlistenPromise.then(unlisten => unlisten());
+    };
   }, []);
 
   const loadData = async () => {
@@ -133,7 +147,7 @@ function App() {
         <Box sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          justifyContent: 'center',
           p: 2,
           pb: 1
         }}>
@@ -143,11 +157,6 @@ function App() {
               音频输出
             </Typography>
           </Box>
-          <Tooltip title="刷新">
-            <IconButton size="small" onClick={loadData}>
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
         </Box>
 
         <Divider />
@@ -169,10 +178,16 @@ function App() {
           {displayDevices.length === 0 ? (
             <ListItem>
               <ListItemText
-                primary="未配置设备"
-                secondary="请在偏好设置中添加设备"
-                primaryTypographyProps={{ variant: 'body2', color: 'text.secondary' }}
-                secondaryTypographyProps={{ variant: 'caption' }}
+                primary={
+                  <Typography variant="body2" color="text.secondary">
+                    未配置设备
+                  </Typography>
+                }
+                secondary={
+                  <Typography variant="caption">
+                    请在偏好设置中添加设备
+                  </Typography>
+                }
               />
             </ListItem>
           ) : (
@@ -196,13 +211,19 @@ function App() {
                   )}
                 </ListItemIcon>
                 <ListItemText
-                  primary={item.name}
-                  secondary={!item.isAvailable ? '设备不可用' : undefined}
-                  primaryTypographyProps={{
-                    variant: 'body2',
-                    fontWeight: item.isCurrent ? 'medium' : 'normal'
-                  }}
-                  secondaryTypographyProps={{ variant: 'caption', color: 'error' }}
+                  primary={
+                    <Typography
+                      variant="body2"
+                      fontWeight={item.isCurrent ? 'medium' : 'normal'}
+                    >
+                      {item.name}
+                    </Typography>
+                  }
+                  secondary={!item.isAvailable ? (
+                    <Typography variant="caption" color="error">
+                      设备不可用
+                    </Typography>
+                  ) : undefined}
                 />
               </ListItem>
             ))
