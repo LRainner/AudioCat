@@ -11,15 +11,12 @@ import {
   ListItemText,
   ListItemIcon,
   Paper,
-  Divider,
-  IconButton,
-  Tooltip
+  Divider
 } from '@mui/material';
 import {
   VolumeUp as VolumeUpIcon,
   RadioButtonChecked as RadioButtonCheckedIcon,
-  RadioButtonUnchecked as RadioButtonUncheckedIcon,
-  AspectRatio as AspectRatioIcon
+  RadioButtonUnchecked as RadioButtonUncheckedIcon
 } from '@mui/icons-material';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { readTextFile, exists } from '@tauri-apps/plugin-fs';
@@ -100,23 +97,18 @@ function App() {
   };
 
   const adjustWindowSize = async () => {
-    console.log('=== adjustWindowSize called ===');
     try {
       const window = getCurrentWebviewWindow();
-      console.log('Got window instance');
 
       // 等待DOM完全渲染
       await new Promise(resolve => setTimeout(resolve, 200));
 
       // 获取当前窗口大小
       const currentSize = await window.innerSize();
-      console.log('Current window size:', currentSize);
 
       // 获取容器元素
       if (containerRef.current) {
         const container = containerRef.current;
-        const rect = container.getBoundingClientRect();
-        console.log('Container rect:', rect);
 
         // 强制重新计算布局
         container.offsetHeight;
@@ -125,30 +117,19 @@ function App() {
         const contentHeight = container.scrollHeight;
         const contentWidth = container.scrollWidth;
 
-        console.log('Container scroll dimensions:', {
-          scrollHeight: contentHeight,
-          scrollWidth: contentWidth,
-          offsetHeight: container.offsetHeight,
-          offsetWidth: container.offsetWidth
-        });
-
         // 计算新的窗口尺寸
         const newHeight = Math.max(contentHeight + 40, 200); // 最小高度200px
         const newWidth = Math.max(contentWidth + 40, 320);   // 最小宽度320px
 
-        console.log('Calculated new size:', { width: newWidth, height: newHeight });
-
         // 只有当尺寸有明显变化时才调整
         if (Math.abs(newHeight - currentSize.height) > 10 || Math.abs(newWidth - currentSize.width) > 10) {
-          console.log('Size difference detected, adjusting window...');
           await window.setSize(new LogicalSize(newWidth, newHeight));
-          console.log('Window size adjusted to:', { width: newWidth, height: newHeight });
-        } else {
-          console.log('Size difference too small, skipping adjustment');
+          console.log('Window size adjusted:', {
+            from: { width: currentSize.width, height: currentSize.height },
+            to: { width: newWidth, height: newHeight }
+          });
         }
       } else {
-        console.log('Container ref not available');
-
         // 备用方法：使用文档尺寸
         const docHeight = Math.max(
           document.documentElement.scrollHeight,
@@ -161,15 +142,12 @@ function App() {
           320
         );
 
-        console.log('Using document dimensions:', { height: docHeight, width: docWidth });
         await window.setSize(new LogicalSize(docWidth + 20, docHeight + 20));
       }
 
     } catch (error) {
       console.error('Failed to adjust window size:', error);
-      console.error('Error details:', error);
     }
-    console.log('=== adjustWindowSize finished ===');
   };
 
   const loadCurrentAudioDevice = async () => {
@@ -254,7 +232,7 @@ function App() {
         <Box sx={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          justifyContent: 'center',
           p: 2,
           pb: 1
         }}>
@@ -264,17 +242,6 @@ function App() {
               音频输出
             </Typography>
           </Box>
-          <Tooltip title="调整窗口大小">
-            <IconButton
-              size="small"
-              onClick={() => {
-                console.log('Adjust button clicked!');
-                adjustWindowSize();
-              }}
-            >
-              <AspectRatioIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
         </Box>
 
         <Divider />
