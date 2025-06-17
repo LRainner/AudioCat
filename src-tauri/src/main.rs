@@ -6,6 +6,7 @@ use tauri::{
     Manager,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
+    WebviewWindowBuilder,
 };
 // use wasapi::{DeviceCollection, Direction, get_default_device_for_role, Role};
 use com_policy_config::{IPolicyConfig, PolicyConfigClient};
@@ -176,14 +177,87 @@ fn create_app_data_dir(path: String) -> Result<(), String> {
     std::fs::create_dir_all(path).map_err(|e| format!("Failed to create directory: {}", e))
 }
 
+// 测试拖动功能的命令
+#[tauri::command]
+fn test_drag_functionality() -> Result<String, String> {
+    Ok("Drag functionality test".to_string())
+}
+
+// 设置窗口为桌面挂件模式
+#[cfg(target_os = "windows")]
+fn set_desktop_widget_mode(window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowLongPtrW, GetWindowLongPtrW, SetWindowPos, SetParent, FindWindowW,
+        GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED,
+        HWND_BOTTOM, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW
+    };
+    use windows::Win32::Foundation::HWND;
+    use windows::core::PCWSTR;
+
+    unsafe {
+        let hwnd = HWND(window.hwnd()?.0 as isize);
+
+        // 获取当前扩展样式
+        let current_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+
+        // 设置扩展样式：工具窗口 + 不激活 + 分层窗口
+        let new_style = current_style |
+            WS_EX_TOOLWINDOW.0 as isize |
+            WS_EX_NOACTIVATE.0 as isize |
+            WS_EX_LAYERED.0 as isize;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
+
+        // 尝试找到 WorkerW 窗口（桌面工作区）
+        let progman_hwnd = FindWindowW(
+            PCWSTR::from_raw("Progman\0".encode_utf16().collect::<Vec<u16>>().as_ptr()),
+            PCWSTR::null()
+        );
+
+        if progman_hwnd.0 != 0 {
+            // 将窗口设置为桌面的子窗口，这样可以避免被"显示桌面"隐藏
+            SetParent(hwnd, progman_hwnd);
+
+            // 设置窗口位置在桌面层级
+            SetWindowPos(
+                hwnd,
+                HWND_BOTTOM,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
+            )?;
+
+            println!("Window set as desktop child widget");
+        } else {
+            // 如果找不到 Progman，使用备用方法
+            SetWindowPos(
+                hwnd,
+                HWND_BOTTOM,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
+            )?;
+
+            println!("Window set with fallback method");
+        }
+
+        println!("Desktop widget mode set for window: {}", window.label());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_desktop_widget_mode(_window: &tauri::WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Desktop widget mode not supported on this platform");
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
             // 创建菜单项
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let toggle_item = MenuItem::with_id(app, "toggle", "显示/隐藏窗口", true, None::<&str>)?;
             let config_item = MenuItem::with_id(app, "preference", "偏好设置", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &config_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&toggle_item, &config_item, &quit_item])?;
 
             // 构建托盘
             TrayIconBuilder::new()
@@ -194,10 +268,14 @@ fn main() {
                     "quit" => {
                         app.exit(0);
                     }
-                    "show" => {
+                    "toggle" => {
                         let window = app.get_webview_window("main").unwrap();
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
+                        if window.is_visible().unwrap_or(false) {
+                            window.hide().unwrap();
+                        } else {
+                            window.show().unwrap();
+                            window.set_focus().unwrap();
+                        }
                     }
                     "preference" => {
                         let preference_window = app.get_webview_window("preference");
@@ -205,7 +283,7 @@ fn main() {
                             window.show().unwrap();
                             window.set_focus().unwrap();
                         } else {
-                            tauri::WebviewWindowBuilder::new(
+                            WebviewWindowBuilder::new(
                                 app,
                                 "preference",
                                 tauri::WebviewUrl::App("preference.html".into()),
@@ -219,15 +297,23 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // 设置主窗口为桌面挂件模式
+            if let Some(main_window) = app.get_webview_window("main") {
+                if let Err(e) = set_desktop_widget_mode(&main_window) {
+                    eprintln!("Failed to set desktop widget mode: {}", e);
+                }
+            }
+
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // 阻止默认的关闭行为
+                    // 由于没有关闭按钮，这个事件通常不会触发
+                    // 但如果触发了，阻止关闭并隐藏窗口
                     api.prevent_close();
-                    // 隐藏窗口而不是关闭
-                    window.hide().unwrap();
+                    // 注意：这里不能调用 window.hide() 因为会导致借用检查问题
                 }
                 _ => {}
             }
@@ -237,7 +323,8 @@ fn main() {
             set_audio_device,
             get_current_audio_device,
             get_audio_output_devices,
-            create_app_data_dir
+            create_app_data_dir,
+            test_drag_functionality
         ]) // 添加命令处理
         .run(tauri::generate_context!())
         .expect("error while running tauri app");

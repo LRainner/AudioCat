@@ -35,9 +35,24 @@ function App() {
   const [configuredDevices, setConfiguredDevices] = useState<string[]>([]);
   const [availableDevices, setAvailableDevices] = useState<AudioDevice[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+
+    // 添加键盘事件监听器，用于打开开发者工具
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'F12' || (event.ctrlKey && event.shiftKey && event.key === 'I')) {
+        event.preventDefault();
+        // 在开发模式下打开开发者工具
+        if ((window as any).__TAURI__) {
+          console.log('Attempting to open dev tools...');
+          // 这里可以添加打开开发者工具的逻辑
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
 
     const initializeApp = async () => {
       if (!mounted) return;
@@ -70,6 +85,7 @@ function App() {
 
     return () => {
       mounted = false;
+      document.removeEventListener('keydown', handleKeyDown);
       cleanup.then(cleanupFn => cleanupFn && cleanupFn());
     };
   }, []);
@@ -150,6 +166,27 @@ function App() {
     }
   };
 
+  // 拖动功能
+  const handleMouseDown = async (e: React.MouseEvent) => {
+    // 只在标题栏区域允许拖动，避免与按钮点击冲突
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('[role="button"]')) {
+      return;
+    }
+
+    e.preventDefault();
+    setIsDragging(true);
+
+    try {
+      const window = getCurrentWebviewWindow();
+      await window.startDragging();
+    } catch (error) {
+      console.error('Failed to start dragging:', error);
+    } finally {
+      setIsDragging(false);
+    }
+  };
+
   const loadCurrentAudioDevice = async () => {
     try {
       const device = await invoke('get_current_audio_device');
@@ -227,15 +264,35 @@ function App() {
 
   return (
     <Box ref={containerRef} sx={{ width: '100%', maxWidth: 320, margin: 'auto', p: 1 }}>
-      <Paper elevation={2} sx={{ borderRadius: 2 }}>
+      <Paper
+        elevation={8}
+        sx={{
+          borderRadius: 3,
+          backdropFilter: 'blur(10px)',
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          '@media (prefers-color-scheme: dark)': {
+            backgroundColor: 'rgba(30, 30, 30, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+          }
+        }}
+      >
         {/* 标题栏 */}
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          p: 2,
-          pb: 1
-        }}>
+        <Box
+          onMouseDown={handleMouseDown}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            p: 2,
+            pb: 1,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            userSelect: 'none',
+            '&:active': {
+              cursor: 'grabbing'
+            }
+          }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <VolumeUpIcon color="primary" />
             <Typography variant="subtitle1" fontWeight="medium">
