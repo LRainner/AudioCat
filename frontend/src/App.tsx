@@ -40,41 +40,54 @@ function App() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadData();
+    let mounted = true;
 
-    // 监听配置更新事件
-    const setupEventListener = async () => {
+    const initializeApp = async () => {
+      if (!mounted) return;
+
+      await loadData();
+
+      // 监听配置更新事件
       const unlisten = await listen('config-updated', (event) => {
         console.log('Received config-updated event, refreshing...', event.payload);
-        loadData();
+        if (mounted) {
+          loadData();
+        }
       });
 
-      return unlisten;
+      // 每5秒刷新一次当前设备状态（只刷新当前设备，不重新加载所有数据）
+      const interval = setInterval(() => {
+        if (mounted) {
+          loadCurrentAudioDevice();
+        }
+      }, 5000);
+
+      return () => {
+        mounted = false;
+        clearInterval(interval);
+        unlisten();
+      };
     };
 
-    let unlistenPromise = setupEventListener();
-
-    // 每5秒刷新一次当前设备状态
-    const interval = setInterval(loadCurrentAudioDevice, 5000);
+    const cleanup = initializeApp();
 
     return () => {
-      clearInterval(interval);
-      unlistenPromise.then(unlisten => unlisten());
+      mounted = false;
+      cleanup.then(cleanupFn => cleanupFn && cleanupFn());
     };
   }, []);
 
   // 当配置设备列表变化时，调整窗口大小
   useEffect(() => {
+    console.log('Configured devices changed:', configuredDevices);
     if (configuredDevices.length >= 0) { // 确保已经加载了配置
-      setTimeout(adjustWindowSize, 300);
+      const timer = setTimeout(() => {
+        console.log('Triggering window size adjustment...');
+        adjustWindowSize();
+      }, 500);
+      return () => clearTimeout(timer);
     }
   }, [configuredDevices]);
-
-  // 组件挂载后也调整一次窗口大小
-  useEffect(() => {
-    const timer = setTimeout(adjustWindowSize, 500);
-    return () => clearTimeout(timer);
-  }, []);
 
   const loadData = async () => {
     await Promise.all([
@@ -87,49 +100,76 @@ function App() {
   };
 
   const adjustWindowSize = async () => {
+    console.log('=== adjustWindowSize called ===');
     try {
       const window = getCurrentWebviewWindow();
+      console.log('Got window instance');
 
-      // 等待一小段时间确保DOM完全渲染
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // 等待DOM完全渲染
+      await new Promise(resolve => setTimeout(resolve, 200));
 
-      // 获取整个文档的尺寸
-      const documentHeight = Math.max(
-        document.documentElement.scrollHeight,
-        document.documentElement.offsetHeight,
-        document.body.scrollHeight,
-        document.body.offsetHeight
-      );
+      // 获取当前窗口大小
+      const currentSize = await window.innerSize();
+      console.log('Current window size:', currentSize);
 
-      const documentWidth = Math.max(
-        document.documentElement.scrollWidth,
-        document.documentElement.offsetWidth,
-        document.body.scrollWidth,
-        document.body.offsetWidth,
-        320 // 最小宽度
-      );
+      // 获取容器元素
+      if (containerRef.current) {
+        const container = containerRef.current;
+        const rect = container.getBoundingClientRect();
+        console.log('Container rect:', rect);
 
-      console.log('Document dimensions:', {
-        height: documentHeight,
-        width: documentWidth,
-        scrollHeight: document.documentElement.scrollHeight,
-        offsetHeight: document.documentElement.offsetHeight,
-        bodyScrollHeight: document.body.scrollHeight,
-        bodyOffsetHeight: document.body.offsetHeight
-      });
+        // 强制重新计算布局
+        container.offsetHeight;
 
-      // 计算窗口尺寸（添加一些缓冲）
-      const windowHeight = Math.min(documentHeight + 20, 800); // 最大高度800px
-      const windowWidth = Math.min(documentWidth + 20, 500);   // 最大宽度500px
+        // 获取实际内容尺寸
+        const contentHeight = container.scrollHeight;
+        const contentWidth = container.scrollWidth;
 
-      console.log('Setting window size to:', { width: windowWidth, height: windowHeight });
+        console.log('Container scroll dimensions:', {
+          scrollHeight: contentHeight,
+          scrollWidth: contentWidth,
+          offsetHeight: container.offsetHeight,
+          offsetWidth: container.offsetWidth
+        });
 
-      // 调整窗口大小
-      await window.setSize(new LogicalSize(windowWidth, windowHeight));
-      console.log('Window size adjusted successfully');
+        // 计算新的窗口尺寸
+        const newHeight = Math.max(contentHeight + 40, 200); // 最小高度200px
+        const newWidth = Math.max(contentWidth + 40, 320);   // 最小宽度320px
+
+        console.log('Calculated new size:', { width: newWidth, height: newHeight });
+
+        // 只有当尺寸有明显变化时才调整
+        if (Math.abs(newHeight - currentSize.height) > 10 || Math.abs(newWidth - currentSize.width) > 10) {
+          console.log('Size difference detected, adjusting window...');
+          await window.setSize(new LogicalSize(newWidth, newHeight));
+          console.log('Window size adjusted to:', { width: newWidth, height: newHeight });
+        } else {
+          console.log('Size difference too small, skipping adjustment');
+        }
+      } else {
+        console.log('Container ref not available');
+
+        // 备用方法：使用文档尺寸
+        const docHeight = Math.max(
+          document.documentElement.scrollHeight,
+          document.body.scrollHeight,
+          200
+        );
+        const docWidth = Math.max(
+          document.documentElement.scrollWidth,
+          document.body.scrollWidth,
+          320
+        );
+
+        console.log('Using document dimensions:', { height: docHeight, width: docWidth });
+        await window.setSize(new LogicalSize(docWidth + 20, docHeight + 20));
+      }
+
     } catch (error) {
       console.error('Failed to adjust window size:', error);
+      console.error('Error details:', error);
     }
+    console.log('=== adjustWindowSize finished ===');
   };
 
   const loadCurrentAudioDevice = async () => {
@@ -225,7 +265,13 @@ function App() {
             </Typography>
           </Box>
           <Tooltip title="调整窗口大小">
-            <IconButton size="small" onClick={adjustWindowSize}>
+            <IconButton
+              size="small"
+              onClick={() => {
+                console.log('Adjust button clicked!');
+                adjustWindowSize();
+              }}
+            >
               <AspectRatioIcon fontSize="small" />
             </IconButton>
           </Tooltip>
