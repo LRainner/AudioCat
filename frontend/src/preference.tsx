@@ -3,15 +3,14 @@ import ReactDOM from 'react-dom/client';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import {
   Box, Typography, TextField, Button, IconButton,
-  MenuItem, Card, CardContent, Stack, Paper, Alert,
-  List, ListItem, ListItemIcon, ListItemText, ListItemButton,
-  Switch, Divider, Drawer
+  MenuItem, Card, CardContent, Stack, Alert,
+  List, ListItemIcon, ListItemText, ListItemButton,
+  Switch
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import WindowIcon from '@mui/icons-material/Window';
 import TestIcon from '@mui/icons-material/PlayArrow';
-import TimerIcon from '@mui/icons-material/Timer';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -22,7 +21,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
-import { BaseDirectory } from '@tauri-apps/api/path'; // BaseDirectory 可能在 @tauri-apps/api/path 中
+
 import './App.css'; // 可以复用主应用的 CSS，或者创建新的 CSS 文件
 
 const CONFIG_FILE_NAME = 'audio_devices.json';
@@ -71,11 +70,7 @@ function PreferenceApp() {
     };
   }, []);
 
-  const getConfigFile = async () => {
-    const appDataDirPath = await appDataDir();
-    console.log('App Data Directory:', appDataDirPath);
-    return await join(appDataDirPath, CONFIG_FILE_NAME);
-  };
+
 
   const loadConfiguredAudioDevices = async () => {
     try {
@@ -186,20 +181,7 @@ function PreferenceApp() {
     saveConfiguredAudioDevices(updatedDevices);
   };
 
-  const handleSwitchDevice = async (deviceName: string) => {
-    try {
-      // 根据设备名称找到对应的设备 ID
-      const device = availableAudioDevices.find(d => d.name === deviceName);
-      if (device) {
-        await invoke('set_audio_device', { deviceId: device.id });
-        console.log(`Switched to device: ${deviceName}`);
-      } else {
-        console.error('Device not found:', deviceName);
-      }
-    } catch (error) {
-      console.error('Failed to switch audio device:', error);
-    }
-  };
+
 
   const handleAddWindow = async () => {
     if (selectedWindowToAdd && monitoredWindows.length < 10 && !monitoredWindows.includes(selectedWindowToAdd)) {
