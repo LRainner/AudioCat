@@ -1,27 +1,29 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-
 // use cpal::traits::{DeviceTrait, HostTrait};
 use tauri::{
-    Manager, Emitter,
+    Emitter, Manager, WebviewWindowBuilder,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    WebviewWindowBuilder,
 };
 
 // use wasapi::{DeviceCollection, Direction, get_default_device_for_role, Role};
 use com_policy_config::{IPolicyConfig, PolicyConfigClient};
-use windows::{
-    core::{PCWSTR, Result as WindowsResult},
-    Win32::{
-        Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
-        Media::Audio::{DEVICE_STATE_ACTIVE, eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator},
-        System::Com::{CLSCTX_ALL, CoCreateInstance, COINIT_MULTITHREADED, CoInitializeEx, STGM_READ},
-    },
-};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use windows::{
+    Win32::{
+        Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
+        Media::Audio::{
+            DEVICE_STATE_ACTIVE, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender,
+        },
+        System::Com::{
+            CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
+        },
+    },
+    core::{PCWSTR, Result as WindowsResult},
+};
 
 // 全局状态管理
 #[derive(Default)]
@@ -30,8 +32,6 @@ struct AppState {
 }
 
 type SharedState = Arc<Mutex<AppState>>;
-
-
 
 #[derive(Debug, Serialize, Deserialize)]
 struct AudioDevice {
@@ -50,7 +50,8 @@ fn set_audio_device(device_id: String) -> Result<String, String> {
 
         let result = (|| -> WindowsResult<String> {
             // 创建设备枚举器
-            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
 
             // 获取设备集合
             let device_collection = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)?;
@@ -76,10 +77,16 @@ fn set_audio_device(device_id: String) -> Result<String, String> {
             // 获取设备名称用于日志
             let property_store = device.OpenPropertyStore(STGM_READ)?;
             let name_prop = property_store.GetValue(&PKEY_Device_FriendlyName)?;
-            let device_name = name_prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string()?;
+            let device_name = name_prop
+                .Anonymous
+                .Anonymous
+                .Anonymous
+                .pwszVal
+                .to_string()?;
 
             // 创建 PolicyConfig 实例来设置默认设备
-            let policy_config: IPolicyConfig = CoCreateInstance(&PolicyConfigClient, None, CLSCTX_ALL)?;
+            let policy_config: IPolicyConfig =
+                CoCreateInstance(&PolicyConfigClient, None, CLSCTX_ALL)?;
             let device_id_pcwstr = PCWSTR(device.GetId()?.0);
 
             // 设置为默认设备（Console 角色用于大多数应用程序）
@@ -114,13 +121,19 @@ fn get_current_audio_device() -> Option<AudioDevice> {
         // 不检查错误，因为 COM 可能已经被 Tauri 初始化了
 
         let result = (|| -> WindowsResult<AudioDevice> {
-            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
             let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
             let device_id = device.GetId()?.to_string()?;
 
             let property_store = device.OpenPropertyStore(STGM_READ)?;
             let name_prop = property_store.GetValue(&PKEY_Device_FriendlyName)?;
-            let device_name = name_prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string()?;
+            let device_name = name_prop
+                .Anonymous
+                .Anonymous
+                .Anonymous
+                .pwszVal
+                .to_string()?;
 
             Ok(AudioDevice {
                 id: device_id,
@@ -145,7 +158,8 @@ fn get_audio_output_devices() -> Vec<AudioDevice> {
         // 不检查错误，因为 COM 可能已经被 Tauri 初始化了
 
         let result = (|| -> WindowsResult<Vec<AudioDevice>> {
-            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
             let device_collection = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)?;
             let device_count = device_collection.GetCount()?;
 
@@ -161,7 +175,12 @@ fn get_audio_output_devices() -> Vec<AudioDevice> {
 
                 let property_store = device.OpenPropertyStore(STGM_READ)?;
                 let name_prop = property_store.GetValue(&PKEY_Device_FriendlyName)?;
-                let device_name = name_prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string()?;
+                let device_name = name_prop
+                    .Anonymous
+                    .Anonymous
+                    .Anonymous
+                    .pwszVal
+                    .to_string()?;
 
                 let is_default = device_id == default_device_id;
 
@@ -215,7 +234,10 @@ fn toggle_passthrough_mode(app_handle: tauri::AppHandle, enabled: bool) -> Resul
             // 禁用穿透模式：在前端恢复拖动
             println!("Passthrough mode disabled - dragging enabled in frontend");
         }
-        Ok(format!("Passthrough mode {}", if enabled { "enabled" } else { "disabled" }))
+        Ok(format!(
+            "Passthrough mode {}",
+            if enabled { "enabled" } else { "disabled" }
+        ))
     } else {
         Err("Main window not found".to_string())
     }
@@ -232,20 +254,21 @@ fn get_passthrough_mode(app_handle: tauri::AppHandle) -> bool {
     false
 }
 
-// 使用 wallpaper 插件，移除了自定义的 Windows API 实现
-
-
-
 fn main() {
     tauri::Builder::default()
         .manage(SharedState::default())
         .setup(|app| {
             // 创建菜单项
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let toggle_item = MenuItem::with_id(app, "toggle", "显示/隐藏窗口", true, None::<&str>)?;
-            let passthrough_item = MenuItem::with_id(app, "passthrough", "穿透模式", true, None::<&str>)?;
+            let toggle_item =
+                MenuItem::with_id(app, "toggle", "显示/隐藏窗口", true, None::<&str>)?;
+            let passthrough_item =
+                MenuItem::with_id(app, "passthrough", "穿透模式", true, None::<&str>)?;
             let config_item = MenuItem::with_id(app, "preference", "偏好设置", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toggle_item, &passthrough_item, &config_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[&toggle_item, &passthrough_item, &config_item, &quit_item],
+            )?;
 
             // 构建托盘
             TrayIconBuilder::new()
@@ -270,8 +293,12 @@ fn main() {
                         let current_mode = if let Some(state) = app.try_state::<SharedState>() {
                             if let Ok(app_state) = state.lock() {
                                 app_state.passthrough_mode
-                            } else { false }
-                        } else { false };
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
 
                         let new_mode = !current_mode;
 
@@ -287,7 +314,10 @@ fn main() {
                             let _ = window.emit("passthrough-mode-changed", new_mode);
                         }
 
-                        println!("Passthrough mode {} via tray menu", if new_mode { "enabled" } else { "disabled" });
+                        println!(
+                            "Passthrough mode {} via tray menu",
+                            if new_mode { "enabled" } else { "disabled" }
+                        );
                     }
                     "preference" => {
                         let preference_window = app.get_webview_window("preference");
