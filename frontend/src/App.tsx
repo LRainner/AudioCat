@@ -19,7 +19,6 @@ import {
   VolumeUp as VolumeUpIcon,
   RadioButtonChecked as RadioButtonCheckedIcon,
   RadioButtonUnchecked as RadioButtonUncheckedIcon,
-  TouchApp as TouchAppIcon,
   PanTool as PanToolIcon
 } from '@mui/icons-material';
 import { appDataDir, join } from '@tauri-apps/api/path';
@@ -40,7 +39,9 @@ function App() {
   const [availableDevices, setAvailableDevices] = useState<AudioDevice[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [isPassthroughMode, setIsPassthroughMode] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [countdownTimer, setCountdownTimer] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -72,26 +73,55 @@ function App() {
         }
       });
 
-      // 监听来自托盘菜单的穿透模式变化
-      const unlistenPassthrough = await listen<boolean>('passthrough-mode-changed', (event) => {
-        console.log('Passthrough mode changed from tray menu:', event.payload);
+      // 监听来自托盘菜单的固定模式变化
+      const unlistenPin = await listen<boolean>('pin-mode-changed', (event) => {
+        console.log('Pin mode changed from tray menu:', event.payload);
         if (mounted) {
-          setIsPassthroughMode(event.payload);
+          setIsPinned(event.payload);
+        }
+      });
+
+      // 监听测试倒计时事件
+      const unlistenTest = await listen<{delay: number}>('test-countdown', (event) => {
+        console.log('Test countdown triggered:', event.payload);
+        if (mounted) {
+          handleWindowClosed(['测试窗口']);
         }
       });
 
       // 每5秒刷新一次当前设备状态（只刷新当前设备，不重新加载所有数据）
-      const interval = setInterval(() => {
+      const deviceInterval = setInterval(() => {
         if (mounted) {
           loadCurrentAudioDevice();
         }
       }, 5000);
 
+      // 每2秒检查窗口变化
+      const windowInterval = setInterval(async () => {
+        if (mounted) {
+          try {
+            const closedWindows = await invoke<string[]>('check_window_changes');
+            if (closedWindows.length > 0) {
+              console.log('Detected closed windows:', closedWindows);
+              // 有监听的窗口关闭了，置顶显示
+              await handleWindowClosed(closedWindows);
+            }
+          } catch (error) {
+            console.error('Failed to check window changes:', error);
+          }
+        }
+      }, 2000);
+
       return () => {
         mounted = false;
-        clearInterval(interval);
+        clearInterval(deviceInterval);
+        clearInterval(windowInterval);
+        if (countdownTimer) {
+          clearInterval(countdownTimer);
+        }
         unlisten();
-        unlistenPassthrough();
+        unlistenPin();
+        unlistenTest();
       };
     };
 
@@ -121,18 +151,27 @@ function App() {
       loadCurrentAudioDevice(),
       loadConfiguredDevices(),
       loadAvailableDevices(),
-      loadPassthroughMode()
+      loadPinMode()
     ]);
+
+    // 启动窗口监听
+    try {
+      await invoke('start_window_monitoring');
+      console.log('Window monitoring started');
+    } catch (error) {
+      console.error('Failed to start window monitoring:', error);
+    }
+
     // 数据加载完成后调整窗口大小，给更多时间让DOM更新
     setTimeout(adjustWindowSize, 300);
   };
 
-  const loadPassthroughMode = async () => {
+  const loadPinMode = async () => {
     try {
-      const currentMode = await invoke<boolean>('get_passthrough_mode');
-      setIsPassthroughMode(currentMode);
+      const currentMode = await invoke<boolean>('get_window_pinned');
+      setIsPinned(currentMode);
     } catch (error) {
-      console.error('Failed to load passthrough mode:', error);
+      console.error('Failed to load pin mode:', error);
     }
   };
 
@@ -233,11 +272,6 @@ function App() {
 
   // 拖动功能
   const handleMouseDown = async (e: React.MouseEvent) => {
-    // 在穿透模式下不允许拖动
-    if (isPassthroughMode) {
-      return;
-    }
-
     // 避免在可交互元素上拖动
     const target = e.target as HTMLElement;
     if (target.closest('button') ||
@@ -260,26 +294,81 @@ function App() {
     }
   };
 
-  // 切换穿透模式 - 使用 wallpaper 插件
-  const togglePassthroughMode = async () => {
+  // 取消置顶状态
+  const unpinWindow = async () => {
     try {
-      const newMode = !isPassthroughMode;
-      console.log(`Attempting to ${newMode ? 'enable' : 'disable'} passthrough mode...`);
+      console.log('Attempting to unpin window...');
 
-      const result = await invoke('toggle_passthrough_mode', { enabled: newMode });
+      // 清理倒计时
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        setCountdownTimer(null);
+      }
+      setCountdown(null);
+
+      const result = await invoke('set_window_pinned', { pinned: false });
       console.log('Backend response:', result);
 
-      setIsPassthroughMode(newMode);
-      console.log(`Frontend state updated: passthrough mode ${newMode ? 'enabled' : 'disabled'}`);
-
-      // 给用户一些视觉反馈
-      if (newMode) {
-        console.log('窗口现在是桌面挂件，固定在桌面上，Win+D 不会隐藏');
-      } else {
-        console.log('窗口现在是正常模式，可以拖动');
-      }
+      setIsPinned(false);
+      console.log('Window unpinned successfully');
     } catch (error) {
-      console.error('Failed to toggle passthrough mode:', error);
+      console.error('Failed to unpin window:', error);
+    }
+  };
+
+  // 处理监听的窗口关闭事件
+  const handleWindowClosed = async (closedWindows: string[]) => {
+    try {
+      console.log('Handling window closed event for:', closedWindows);
+
+      // 置顶窗口
+      const result = await invoke('set_window_pinned', { pinned: true });
+      console.log('Window pinned due to monitored window closure:', result);
+
+      setIsPinned(true);
+
+      // 显示窗口（如果被隐藏了）
+      const window = getCurrentWebviewWindow();
+      await window.show();
+      await window.setFocus();
+
+      // 获取自动隐藏延迟
+      const delay = await invoke<number>('get_auto_hide_delay');
+      console.log(`Will auto-unpin after ${delay} seconds`);
+
+      // 开始倒计时
+      setCountdown(delay);
+
+      // 设置倒计时定时器
+      const timer = setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            // 倒计时结束，自动取消置顶
+            clearInterval(timer);
+            setCountdownTimer(null);
+            setCountdown(null);
+
+            // 异步取消置顶
+            (async () => {
+              try {
+                await invoke('set_window_pinned', { pinned: false });
+                setIsPinned(false);
+                console.log('Auto-unpinned window after countdown');
+              } catch (error) {
+                console.error('Failed to auto-unpin window:', error);
+              }
+            })();
+
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      setCountdownTimer(timer);
+
+    } catch (error) {
+      console.error('Failed to handle window closed event:', error);
     }
   };
 
@@ -361,7 +450,7 @@ function App() {
   return (
     <Paper
       ref={containerRef}
-      onMouseDown={isPassthroughMode ? undefined : handleMouseDown}
+      onMouseDown={handleMouseDown}
       elevation={8}
       sx={{
         borderRadius: 3,
@@ -374,7 +463,7 @@ function App() {
         minWidth: 320,
         minHeight: 150,
         boxSizing: 'border-box',
-        cursor: isPassthroughMode ? 'default' : (isDragging ? 'grabbing' : 'grab'),
+        cursor: isDragging ? 'grabbing' : 'grab',
         userSelect: 'none',
         '@media (prefers-color-scheme: dark)': {
           backgroundColor: 'rgba(30, 30, 30, 0.95)',
@@ -399,15 +488,47 @@ function App() {
               音频输出
             </Typography>
           </Box>
-          <Tooltip title={isPassthroughMode ? "退出穿透模式" : "进入穿透模式"}>
-            <IconButton
-              size="small"
-              onClick={togglePassthroughMode}
-              color={isPassthroughMode ? "primary" : "default"}
-            >
-              {isPassthroughMode ? <PanToolIcon fontSize="small" /> : <TouchAppIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
+          {isPinned && (
+            <Tooltip title={countdown ? `${countdown}秒后自动取消置顶，点击立即取消` : "取消置顶"}>
+              <IconButton
+                size="small"
+                onClick={unpinWindow}
+                color="primary"
+                sx={{
+                  position: 'relative',
+                  backgroundColor: countdown ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+                  '&:hover': {
+                    backgroundColor: countdown ? 'rgba(25, 118, 210, 0.2)' : 'rgba(0, 0, 0, 0.04)',
+                  }
+                }}
+              >
+                <PanToolIcon fontSize="small" />
+                {countdown && (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      top: '-4px',
+                      right: '-4px',
+                      backgroundColor: 'error.main',
+                      color: 'white',
+                      borderRadius: '50%',
+                      width: '18px',
+                      height: '18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      border: '1px solid white',
+                      zIndex: 1,
+                    }}
+                  >
+                    {countdown}
+                  </Box>
+                )}
+              </IconButton>
+            </Tooltip>
+          )}
         </Box>
 
         <Divider />

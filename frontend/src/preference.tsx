@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { Box, Typography, TextField, Button, List, ListItem, ListItemText, IconButton, MenuItem } from '@mui/material';
+import { Box, Typography, TextField, Button, List, ListItem, ListItemText, IconButton, MenuItem, Divider, Slider } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import WindowIcon from '@mui/icons-material/Window';
+import TestIcon from '@mui/icons-material/PlayArrow';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { appDataDir, join } from '@tauri-apps/api/path';
@@ -28,9 +30,18 @@ function PreferenceApp() {
   const [availableAudioDevices, setAvailableAudioDevices] = useState<AudioDevice[]>([]);
   const [selectedDeviceToAdd, setSelectedDeviceToAdd] = useState('');
 
+  // 窗口监听相关状态
+  const [monitoredWindows, setMonitoredWindows] = useState<string[]>([]);
+  const [availableWindows, setAvailableWindows] = useState<string[]>([]);
+  const [selectedWindowToAdd, setSelectedWindowToAdd] = useState('');
+  const [autoHideDelay, setAutoHideDelay] = useState<number>(10);
+
   useEffect(() => {
     loadConfiguredAudioDevices();
     loadAvailableAudioDevices();
+    loadMonitoredWindows();
+    loadAvailableWindows();
+    loadAutoHideDelay();
   }, []);
 
   const getConfigFile = async () => {
@@ -69,6 +80,36 @@ function PreferenceApp() {
       console.log('Available devices:', devices);
     } catch (error) {
       console.error('Failed to get available audio devices:', error);
+    }
+  };
+
+  const loadMonitoredWindows = async () => {
+    try {
+      const windows = await invoke('get_monitored_windows');
+      setMonitoredWindows(windows as string[]);
+      console.log('Monitored windows:', windows);
+    } catch (error) {
+      console.error('Failed to get monitored windows:', error);
+    }
+  };
+
+  const loadAvailableWindows = async () => {
+    try {
+      const windows = await invoke('get_running_windows');
+      setAvailableWindows(windows as string[]);
+      console.log('Available windows:', windows);
+    } catch (error) {
+      console.error('Failed to get available windows:', error);
+    }
+  };
+
+  const loadAutoHideDelay = async () => {
+    try {
+      const delay = await invoke('get_auto_hide_delay');
+      setAutoHideDelay(delay as number);
+      console.log('Auto hide delay:', delay);
+    } catch (error) {
+      console.error('Failed to get auto hide delay:', error);
     }
   };
 
@@ -123,11 +164,148 @@ function PreferenceApp() {
     }
   };
 
+  const handleAddWindow = async () => {
+    if (selectedWindowToAdd && monitoredWindows.length < 10 && !monitoredWindows.includes(selectedWindowToAdd)) {
+      const updatedWindows = [...monitoredWindows, selectedWindowToAdd];
+      try {
+        await invoke('set_monitored_windows', { windows: updatedWindows });
+        setMonitoredWindows(updatedWindows);
+        setSelectedWindowToAdd('');
+        console.log('Added monitored window:', selectedWindowToAdd);
+      } catch (error) {
+        console.error('Failed to add monitored window:', error);
+      }
+    }
+  };
+
+  const handleDeleteWindow = async (index: number) => {
+    const updatedWindows = monitoredWindows.filter((_, i) => i !== index);
+    try {
+      await invoke('set_monitored_windows', { windows: updatedWindows });
+      setMonitoredWindows(updatedWindows);
+      console.log('Removed monitored window at index:', index);
+    } catch (error) {
+      console.error('Failed to remove monitored window:', error);
+    }
+  };
+
+  const handleDelayChange = async (newDelay: number) => {
+    try {
+      await invoke('set_auto_hide_delay', { delay: newDelay });
+      setAutoHideDelay(newDelay);
+      console.log('Updated auto hide delay:', newDelay);
+    } catch (error) {
+      console.error('Failed to update auto hide delay:', error);
+    }
+  };
+
+  const testCountdown = async () => {
+    try {
+      // 模拟窗口关闭事件，触发倒计时
+      await invoke('set_window_pinned', { pinned: true });
+      await emit('test-countdown', { delay: autoHideDelay });
+      console.log('Test countdown triggered');
+    } catch (error) {
+      console.error('Failed to test countdown:', error);
+    }
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" component="h1" gutterBottom>
         偏好设置
       </Typography>
+
+      <Box mt={4}>
+        <Typography variant="h6" gutterBottom>
+          窗口监听设置
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          当监听的窗口关闭时，音频切换器将自动置顶显示
+        </Typography>
+
+        <Box mt={2}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="subtitle2">
+              自动隐藏延迟: {autoHideDelay} 秒
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<TestIcon />}
+              onClick={testCountdown}
+            >
+              测试倒计时
+            </Button>
+          </Box>
+          <Slider
+            value={autoHideDelay}
+            onChange={(_, value) => handleDelayChange(value as number)}
+            min={5}
+            max={60}
+            step={5}
+            marks={[
+              { value: 5, label: '5s' },
+              { value: 10, label: '10s' },
+              { value: 30, label: '30s' },
+              { value: 60, label: '60s' }
+            ]}
+            valueLabelDisplay="auto"
+            sx={{ mb: 2 }}
+          />
+        </Box>
+
+        <Typography variant="subtitle2" gutterBottom>
+          监听的窗口 (最多10个)
+        </Typography>
+        <List>
+          {monitoredWindows.map((window, index) => (
+            <ListItem
+              key={index}
+              secondaryAction={
+                <IconButton edge="end" aria-label="delete" onClick={() => handleDeleteWindow(index)}>
+                  <DeleteIcon />
+                </IconButton>
+              }
+            >
+              <WindowIcon sx={{ mr: 2, color: 'primary.main' }} />
+              <ListItemText primary={window} />
+            </ListItem>
+          ))}
+        </List>
+
+        {monitoredWindows.length < 10 && (
+          <Box mt={2}>
+            <TextField
+              select
+              label="选择要监听的窗口"
+              value={selectedWindowToAdd}
+              onChange={(e) => setSelectedWindowToAdd(e.target.value)}
+              variant="outlined"
+              size="small"
+              fullWidth
+              sx={{ mb: 1 }}
+            >
+              {availableWindows.map((window, index) => (
+                <MenuItem key={index} value={window}>
+                  {window}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={handleAddWindow}
+              disabled={!selectedWindowToAdd || monitoredWindows.includes(selectedWindowToAdd)}
+              fullWidth
+            >
+              添加监听窗口
+            </Button>
+          </Box>
+        )}
+      </Box>
+
+      <Divider sx={{ my: 4 }} />
 
       <Box mt={4}>
         <Typography variant="h6" gutterBottom>

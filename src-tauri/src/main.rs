@@ -21,6 +21,10 @@ use windows::{
         System::Com::{
             CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
         },
+        UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowTextW, IsWindowVisible,
+        },
+        Foundation::{HWND, LPARAM, BOOL},
     },
     core::{PCWSTR, Result as WindowsResult},
 };
@@ -28,7 +32,11 @@ use windows::{
 // 全局状态管理
 #[derive(Default)]
 struct AppState {
-    passthrough_mode: bool,
+    is_pinned: bool,
+    monitored_windows: Vec<String>,
+    auto_hide_delay: u64, // 秒
+    last_seen_windows: Vec<String>, // 上次检查时存在的窗口
+    monitoring_active: bool, // 是否正在监听
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -215,43 +223,210 @@ fn test_drag_functionality() -> Result<String, String> {
     Ok("Drag functionality test".to_string())
 }
 
-// 切换穿透模式的命令 - 改进的自定义实现
+// 设置窗口置顶状态
 #[tauri::command]
-fn toggle_passthrough_mode(app_handle: tauri::AppHandle, enabled: bool) -> Result<String, String> {
-    if let Some(_window) = app_handle.get_webview_window("main") {
+fn set_window_pinned(app_handle: tauri::AppHandle, pinned: bool) -> Result<String, String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
         // 更新全局状态
         if let Some(state) = app_handle.try_state::<SharedState>() {
             if let Ok(mut app_state) = state.lock() {
-                app_state.passthrough_mode = enabled;
+                app_state.is_pinned = pinned;
             }
         }
 
-        if enabled {
-            // 启用穿透模式：只在前端禁用拖动，保持点击功能
-            // 不使用 Windows API，避免影响交互
-            println!("Passthrough mode enabled - dragging disabled in frontend");
-        } else {
-            // 禁用穿透模式：在前端恢复拖动
-            println!("Passthrough mode disabled - dragging enabled in frontend");
+        // 设置窗口置顶状态
+        if let Err(e) = window.set_always_on_top(pinned) {
+            return Err(format!("Failed to set window always on top: {}", e));
         }
+
+        if pinned {
+            println!("Window pinned to top");
+        } else {
+            println!("Window unpinned from top");
+        }
+
         Ok(format!(
-            "Passthrough mode {}",
-            if enabled { "enabled" } else { "disabled" }
+            "Window {}",
+            if pinned { "pinned" } else { "unpinned" }
         ))
     } else {
         Err("Main window not found".to_string())
     }
 }
 
-// 获取当前穿透模式状态
+// 获取当前窗口置顶状态
 #[tauri::command]
-fn get_passthrough_mode(app_handle: tauri::AppHandle) -> bool {
+fn get_window_pinned(app_handle: tauri::AppHandle) -> bool {
     if let Some(state) = app_handle.try_state::<SharedState>() {
         if let Ok(app_state) = state.lock() {
-            return app_state.passthrough_mode;
+            return app_state.is_pinned;
         }
     }
     false
+}
+
+// 获取当前运行的窗口列表
+#[tauri::command]
+fn get_running_windows() -> Vec<String> {
+    let mut windows = Vec::new();
+
+    unsafe {
+        let result = EnumWindows(
+            Some(enum_windows_proc),
+            LPARAM(&mut windows as *mut Vec<String> as isize),
+        );
+
+        if result.is_err() {
+            println!("Failed to enumerate windows: {:?}", result);
+        }
+    }
+
+    windows
+}
+
+// 窗口枚举回调函数
+unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let windows = &mut *(lparam.0 as *mut Vec<String>);
+
+    // 检查窗口是否可见
+    if IsWindowVisible(hwnd).as_bool() {
+        let mut buffer = [0u16; 256];
+        let length = GetWindowTextW(hwnd, &mut buffer);
+
+        if length > 0 {
+            let title = String::from_utf16_lossy(&buffer[..length as usize]);
+            if !title.trim().is_empty() {
+                windows.push(title);
+            }
+        }
+    }
+
+    BOOL::from(true) // 继续枚举
+}
+
+// 设置监听的窗口列表
+#[tauri::command]
+fn set_monitored_windows(app_handle: tauri::AppHandle, windows: Vec<String>) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(mut app_state) = state.lock() {
+            app_state.monitored_windows = windows.clone();
+        }
+        Ok(format!("Set {} monitored windows", windows.len()))
+    } else {
+        Err("Failed to access app state".to_string())
+    }
+}
+
+// 获取监听的窗口列表
+#[tauri::command]
+fn get_monitored_windows(app_handle: tauri::AppHandle) -> Vec<String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(app_state) = state.lock() {
+            return app_state.monitored_windows.clone();
+        }
+    }
+    Vec::new()
+}
+
+// 设置自动隐藏延迟
+#[tauri::command]
+fn set_auto_hide_delay(app_handle: tauri::AppHandle, delay: u64) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(mut app_state) = state.lock() {
+            app_state.auto_hide_delay = delay;
+        }
+        Ok(format!("Set auto hide delay to {} seconds", delay))
+    } else {
+        Err("Failed to access app state".to_string())
+    }
+}
+
+// 获取自动隐藏延迟
+#[tauri::command]
+fn get_auto_hide_delay(app_handle: tauri::AppHandle) -> u64 {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(app_state) = state.lock() {
+            return app_state.auto_hide_delay;
+        }
+    }
+    10 // 默认10秒
+}
+
+// 开始监听窗口
+#[tauri::command]
+fn start_window_monitoring(app_handle: tauri::AppHandle) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(mut app_state) = state.lock() {
+            app_state.monitoring_active = true;
+            // 初始化当前窗口列表
+            app_state.last_seen_windows = get_current_window_titles();
+        }
+        Ok("Window monitoring started".to_string())
+    } else {
+        Err("Failed to access app state".to_string())
+    }
+}
+
+// 停止监听窗口
+#[tauri::command]
+fn stop_window_monitoring(app_handle: tauri::AppHandle) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(mut app_state) = state.lock() {
+            app_state.monitoring_active = false;
+        }
+        Ok("Window monitoring stopped".to_string())
+    } else {
+        Err("Failed to access app state".to_string())
+    }
+}
+
+// 检查窗口变化（由定时器调用）
+#[tauri::command]
+fn check_window_changes(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let mut closed_windows = Vec::new();
+
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(mut app_state) = state.lock() {
+            if !app_state.monitoring_active {
+                return Ok(closed_windows);
+            }
+
+            let current_windows = get_current_window_titles();
+            let monitored = app_state.monitored_windows.clone();
+            let last_seen = app_state.last_seen_windows.clone();
+
+            // 检查哪些监听的窗口被关闭了
+            for window_title in &monitored {
+                if last_seen.contains(window_title) && !current_windows.contains(window_title) {
+                    closed_windows.push(window_title.clone());
+                    println!("Detected window closed: {}", window_title);
+                }
+            }
+
+            // 更新上次看到的窗口列表
+            app_state.last_seen_windows = current_windows;
+        }
+    }
+
+    Ok(closed_windows)
+}
+
+// 获取当前所有窗口标题的辅助函数
+fn get_current_window_titles() -> Vec<String> {
+    let mut windows = Vec::new();
+
+    unsafe {
+        let result = EnumWindows(
+            Some(enum_windows_proc),
+            LPARAM(&mut windows as *mut Vec<String> as isize),
+        );
+
+        if result.is_err() {
+            println!("Failed to enumerate windows: {:?}", result);
+        }
+    }
+
+    windows
 }
 
 fn main() {
@@ -262,12 +437,12 @@ fn main() {
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let toggle_item =
                 MenuItem::with_id(app, "toggle", "显示/隐藏窗口", true, None::<&str>)?;
-            let passthrough_item =
-                MenuItem::with_id(app, "passthrough", "穿透模式", true, None::<&str>)?;
+            let pin_item =
+                MenuItem::with_id(app, "pin", "固定模式", true, None::<&str>)?;
             let config_item = MenuItem::with_id(app, "preference", "偏好设置", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&toggle_item, &passthrough_item, &config_item, &quit_item],
+                &[&toggle_item, &pin_item, &config_item, &quit_item],
             )?;
 
             // 构建托盘
@@ -288,11 +463,11 @@ fn main() {
                             window.set_focus().unwrap();
                         }
                     }
-                    "passthrough" => {
-                        // 切换穿透模式 - 获取当前状态并切换
-                        let current_mode = if let Some(state) = app.try_state::<SharedState>() {
+                    "pin" => {
+                        // 切换固定模式 - 获取当前状态并切换
+                        let current_pinned = if let Some(state) = app.try_state::<SharedState>() {
                             if let Ok(app_state) = state.lock() {
-                                app_state.passthrough_mode
+                                app_state.is_pinned
                             } else {
                                 false
                             }
@@ -300,23 +475,24 @@ fn main() {
                             false
                         };
 
-                        let new_mode = !current_mode;
+                        let new_pinned = !current_pinned;
 
                         // 更新状态
                         if let Some(state) = app.try_state::<SharedState>() {
                             if let Ok(mut app_state) = state.lock() {
-                                app_state.passthrough_mode = new_mode;
+                                app_state.is_pinned = new_pinned;
                             }
                         }
 
-                        // 通知前端状态变化
+                        // 设置窗口置顶状态
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("passthrough-mode-changed", new_mode);
+                            let _ = window.set_always_on_top(new_pinned);
+                            let _ = window.emit("pin-mode-changed", new_pinned);
                         }
 
                         println!(
-                            "Passthrough mode {} via tray menu",
-                            if new_mode { "enabled" } else { "disabled" }
+                            "Pin mode {} via tray menu",
+                            if new_pinned { "enabled" } else { "disabled" }
                         );
                     }
                     "preference" => {
@@ -366,8 +542,16 @@ fn main() {
             get_audio_output_devices,
             create_app_data_dir,
             test_drag_functionality,
-            toggle_passthrough_mode,
-            get_passthrough_mode
+            set_window_pinned,
+            get_window_pinned,
+            get_running_windows,
+            set_monitored_windows,
+            get_monitored_windows,
+            set_auto_hide_delay,
+            get_auto_hide_delay,
+            start_window_monitoring,
+            stop_window_monitoring,
+            check_window_changes
         ]) // 添加命令处理
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
