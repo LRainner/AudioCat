@@ -1,120 +1,71 @@
-# Tauri + React + Typescript
+# 音频输出切换器
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+一个简单易用的 Windows 音频输出设备切换工具，支持快速切换音频设备和窗口监听功能。
 
-## Recommended IDE Setup
+## 功能特性
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- 🎵 **快速切换音频设备** - 一键切换到预设的音频输出设备
+- 🖥️ **窗口监听** - 监听指定窗口关闭时自动显示切换器
+- 📌 **置顶显示** - 窗口可以保持在所有其他窗口之上
+- 🌙 **深色模式** - 支持浅色/深色主题切换
+- ⚙️ **偏好设置** - 可配置的延迟时间、监听窗口等
+- 💾 **配置持久化** - 自动保存用户设置和窗口位置
 
-## Project Setup
+## 使用方法
 
-### Prerequisites
+### 托盘操作
+- **左键点击托盘图标** - 显示/隐藏主窗口
+- **右键点击托盘图标** - 显示功能菜单
 
-- Node.js (LTS version recommended)
-- Rust (latest stable version recommended)
-- Tauri CLI (`cargo install tauri-cli --version "^2.0.0-beta"`)
+### 主窗口
+- 点击音频设备名称快速切换
+- 拖拽窗口移动位置
+- 使用置顶按钮固定窗口位置
 
-### Development
+### 偏好设置
+- **通用设置** - 深色模式开关
+- **音效设置** - 管理音频输出设备（最多4个）
+- **窗口监听** - 配置监听窗口和自动隐藏延迟（0-60秒）
+- **关于** - 应用信息和配置文件管理
 
-To run the application in development mode:
+## 开发环境
 
-1.  Navigate to the `frontend` directory and install dependencies:
-    ```bash
-    cd frontend
-    npm install
-    ```
-2.  Go back to the project root and start the Tauri development server:
-    ```bash
-    cd ..
-    cargo tauri dev
-    ```
+### 环境要求
+- Node.js (LTS 版本)
+- Rust (最新稳定版)
+- Tauri CLI
 
-### Build
-
-To build the application for production:
-
-1.  Navigate to the `frontend` directory and build the frontend assets:
-    ```bash
-    cd frontend
-    npm run build
-    ```
-2.  Go back to the project root and build the Tauri application:
-    ```bash
-    cd ..
-    cargo tauri build
-    ```
-
-### Code Style and Quality Checks
-
-To format your Rust code:
-
+### 安装依赖
 ```bash
-cargo +nightly fmt -- --config-path .\rustfmt.toml
+cd frontend
+npm install
 ```
 
-To run Rust linter checks:
-
+### 开发运行
 ```bash
-cargo clippy -- -D warnings
+cargo tauri dev
 ```
 
----
+### 构建应用
+```bash
+cargo tauri build
+```
 
-# Tauri + React + Typescript (中文)
-
-此模板旨在帮助您开始使用 Tauri、React 和 Typescript 进行开发。
-
-## 推荐的 IDE 设置
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
-
-## 项目设置
-
-### 先决条件
-
-- Node.js (推荐 LTS 版本)
-- Rust (推荐最新稳定版本)
-- Tauri CLI (`cargo install tauri-cli --version "^2.0.0-beta"`)
-
-### 开发
-
-要在开发模式下运行应用程序：
-
-1.  进入 `frontend` 目录并安装依赖：
-    ```bash
-    cd frontend
-    npm install
-    ```
-2.  返回项目根目录并启动 Tauri 开发服务器：
-    ```bash
-    cd ..
-    cargo tauri dev
-    ```
-
-### 构建
-
-要构建生产环境应用程序：
-
-1.  进入 `frontend` 目录并构建前端资源：
-    ```bash
-    cd frontend
-    npm run build
-    ```
-2.  返回项目根目录并构建 Tauri 应用程序：
-    ```bash
-    cd ..
-    cargo tauri build
-
-### 代码风格和质量检查
+### 代码质量检查
 
 格式化 Rust 代码：
-
 ```bash
 cargo +nightly fmt -- --config-path .\rustfmt.toml
 ```
 
-运行 Rust Lint 检查：
-
+运行 Rust 代码检查：
 ```bash
 cargo clippy -- -D warnings
 ```
+
+## 技术栈
+
+- **前端**: React + TypeScript + Material-UI
+- **后端**: Rust + Tauri
+- **音频**: Windows WASAPI
+- **构建**: Vite + Cargo

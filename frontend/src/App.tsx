@@ -13,7 +13,9 @@ import {
   Paper,
   Divider,
   IconButton,
-  Tooltip
+  Tooltip,
+  ThemeProvider,
+  createTheme
 } from '@mui/material';
 import {
   VolumeUp as VolumeUpIcon,
@@ -42,6 +44,36 @@ function App() {
   const [isPinned, setIsPinned] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [countdownTimer, setCountdownTimer] = useState<number | null>(null);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // 创建主题
+  const theme = createTheme({
+    palette: {
+      mode: darkMode ? 'dark' : 'light',
+      ...(darkMode && {
+        background: {
+          default: 'transparent',
+          paper: 'rgba(30, 30, 30, 0.95)',
+        },
+        text: {
+          primary: '#e8e8e8',
+          secondary: '#b0b0b0',
+        },
+      }),
+    },
+    components: {
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            ...(darkMode && {
+              backgroundColor: 'rgba(30, 30, 30, 0.95)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+            }),
+          },
+        },
+      },
+    },
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -89,6 +121,14 @@ function App() {
         }
       });
 
+      // 监听深色模式变化
+      const unlistenDarkMode = await listen<boolean>('dark-mode-changed', (event) => {
+        console.log('Dark mode changed from tray menu:', event.payload);
+        if (mounted) {
+          setDarkMode(event.payload);
+        }
+      });
+
       // 每5秒刷新一次当前设备状态（只刷新当前设备，不重新加载所有数据）
       const deviceInterval = setInterval(() => {
         if (mounted) {
@@ -122,6 +162,7 @@ function App() {
         unlisten();
         unlistenPin();
         unlistenTest();
+        unlistenDarkMode();
       };
     };
 
@@ -151,7 +192,8 @@ function App() {
       loadCurrentAudioDevice(),
       loadConfiguredDevices(),
       loadAvailableDevices(),
-      loadPinMode()
+      loadPinMode(),
+      loadDarkMode()
     ]);
 
     // 启动窗口监听
@@ -172,6 +214,15 @@ function App() {
       setIsPinned(currentMode);
     } catch (error) {
       console.error('Failed to load pin mode:', error);
+    }
+  };
+
+  const loadDarkMode = async () => {
+    try {
+      const currentMode = await invoke<boolean>('get_dark_mode');
+      setDarkMode(currentMode);
+    } catch (error) {
+      console.error('Failed to load dark mode:', error);
     }
   };
 
@@ -448,15 +499,16 @@ function App() {
   const displayDevices = getDisplayDevices();
 
   return (
-    <Paper
+    <ThemeProvider theme={theme}>
+      <Paper
       ref={containerRef}
       onMouseDown={handleMouseDown}
       elevation={8}
       sx={{
         borderRadius: 3,
         backdropFilter: 'blur(10px)',
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
+        backgroundColor: darkMode ? 'rgba(30, 30, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+        border: darkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(255, 255, 255, 0.2)',
         margin: 0,
         padding: 0,
         width: 'fit-content',
@@ -464,11 +516,7 @@ function App() {
         minHeight: 150,
         boxSizing: 'border-box',
         cursor: isDragging ? 'grabbing' : 'grab',
-        userSelect: 'none',
-        '@media (prefers-color-scheme: dark)': {
-          backgroundColor: 'rgba(30, 30, 30, 0.95)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-        }
+        userSelect: 'none'
       }}
     >
         {/* 标题栏 */}
@@ -602,6 +650,7 @@ function App() {
           )}
         </List>
       </Paper>
+    </ThemeProvider>
   );
 }
 

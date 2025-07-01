@@ -11,20 +11,20 @@ use tauri::{
 // use wasapi::{DeviceCollection, Direction, get_default_device_for_role, Role};
 use com_policy_config::{IPolicyConfig, PolicyConfigClient};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use windows::{
     Win32::{
         Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
+        Foundation::{BOOL, HWND, LPARAM},
         Media::Audio::{
             DEVICE_STATE_ACTIVE, IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender,
         },
         System::Com::{
             CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
         },
-        UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowTextW, IsWindowVisible,
-        },
-        Foundation::{HWND, LPARAM, BOOL},
+        UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible},
     },
     core::{PCWSTR, Result as WindowsResult},
 };
@@ -34,9 +34,10 @@ use windows::{
 struct AppState {
     is_pinned: bool,
     monitored_windows: Vec<String>,
-    auto_hide_delay: u64, // 秒
+    auto_hide_delay: u64,           // 秒
     last_seen_windows: Vec<String>, // 上次检查时存在的窗口
-    monitoring_active: bool, // 是否正在监听
+    monitoring_active: bool,        // 是否正在监听
+    dark_mode: bool,                // 深色模式
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -46,6 +47,134 @@ struct AudioDevice {
     id: String,
     name: String,
     is_default: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct WindowPosition {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WindowConfig {
+    monitored_windows: Vec<String>,
+    auto_hide_delay: u64,
+    main_window_position: Option<WindowPosition>,
+    preference_window_position: Option<WindowPosition>,
+    dark_mode: bool,
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            monitored_windows: Vec::new(),
+            auto_hide_delay: 5, // 默认5秒
+            main_window_position: None,
+            preference_window_position: None,
+            dark_mode: false, // 默认浅色模式
+        }
+    }
+}
+
+// 获取配置文件路径
+fn get_window_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+    Ok(app_data_dir.join("window_config.json"))
+}
+
+// 加载窗口配置
+fn load_window_config(app_handle: &tauri::AppHandle) -> WindowConfig {
+    match get_window_config_path(app_handle) {
+        Ok(config_path) => {
+            if config_path.exists() {
+                match fs::read_to_string(&config_path) {
+                    Ok(content) => match serde_json::from_str::<WindowConfig>(&content) {
+                        Ok(config) => {
+                            println!("Loaded window config: {:?}", config);
+                            return config;
+                        }
+                        Err(e) => println!("Failed to parse window config: {}", e),
+                    },
+                    Err(e) => println!("Failed to read window config file: {}", e),
+                }
+            }
+        }
+        Err(e) => println!("Failed to get config path: {}", e),
+    }
+
+    println!("Using default window config");
+    WindowConfig::default()
+}
+
+// 保存窗口配置
+fn save_window_config(app_handle: &tauri::AppHandle, config: &WindowConfig) -> Result<(), String> {
+    let config_path = get_window_config_path(app_handle)?;
+
+    // 确保父目录存在
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    }
+
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    fs::write(&config_path, content).map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    println!("Saved window config: {:?}", config);
+    Ok(())
+}
+
+// 保存窗口位置
+#[tauri::command]
+fn save_window_position(
+    app_handle: tauri::AppHandle,
+    window_label: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<String, String> {
+    let mut current_config = load_window_config(&app_handle);
+
+    let position = WindowPosition {
+        x,
+        y,
+        width,
+        height,
+    };
+
+    match window_label.as_str() {
+        "main" => current_config.main_window_position = Some(position),
+        "preference" => current_config.preference_window_position = Some(position),
+        _ => return Err(format!("Unknown window label: {}", window_label)),
+    }
+
+    if let Err(e) = save_window_config(&app_handle, &current_config) {
+        return Err(format!("Failed to save window position: {}", e));
+    }
+
+    Ok(format!("Saved position for window: {}", window_label))
+}
+
+// 获取窗口位置
+#[tauri::command]
+fn get_window_position(
+    app_handle: tauri::AppHandle,
+    window_label: String,
+) -> Option<WindowPosition> {
+    let config = load_window_config(&app_handle);
+
+    match window_label.as_str() {
+        "main" => config.main_window_position,
+        "preference" => config.preference_window_position,
+        _ => None,
+    }
 }
 
 // 定义一个 Tauri 命令，用于设置音频设备
@@ -204,10 +333,7 @@ fn get_audio_output_devices() -> Vec<AudioDevice> {
 
         // 不调用 CoUninitialize，因为 COM 可能被 Tauri 管理
 
-        match result {
-            Ok(devices) => devices,
-            Err(_) => Vec::new(),
-        }
+        result.unwrap_or_default()
     }
 }
 
@@ -306,11 +432,36 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
 
 // 设置监听的窗口列表
 #[tauri::command]
-fn set_monitored_windows(app_handle: tauri::AppHandle, windows: Vec<String>) -> Result<String, String> {
+fn set_monitored_windows(
+    app_handle: tauri::AppHandle,
+    windows: Vec<String>,
+) -> Result<String, String> {
     if let Some(state) = app_handle.try_state::<SharedState>() {
+        let auto_hide_delay = if let Ok(app_state) = state.lock() {
+            app_state.auto_hide_delay
+        } else {
+            5 // 默认值
+        };
+
+        // 更新内存中的状态
         if let Ok(mut app_state) = state.lock() {
             app_state.monitored_windows = windows.clone();
         }
+
+        // 保存到配置文件
+        let current_config = load_window_config(&app_handle);
+        let config = WindowConfig {
+            monitored_windows: windows.clone(),
+            auto_hide_delay,
+            main_window_position: current_config.main_window_position,
+            preference_window_position: current_config.preference_window_position,
+            dark_mode: current_config.dark_mode,
+        };
+
+        if let Err(e) = save_window_config(&app_handle, &config) {
+            println!("Failed to save window config: {}", e);
+        }
+
         Ok(format!("Set {} monitored windows", windows.len()))
     } else {
         Err("Failed to access app state".to_string())
@@ -332,9 +483,31 @@ fn get_monitored_windows(app_handle: tauri::AppHandle) -> Vec<String> {
 #[tauri::command]
 fn set_auto_hide_delay(app_handle: tauri::AppHandle, delay: u64) -> Result<String, String> {
     if let Some(state) = app_handle.try_state::<SharedState>() {
+        let monitored_windows = if let Ok(app_state) = state.lock() {
+            app_state.monitored_windows.clone()
+        } else {
+            Vec::new()
+        };
+
+        // 更新内存中的状态
         if let Ok(mut app_state) = state.lock() {
             app_state.auto_hide_delay = delay;
         }
+
+        // 保存到配置文件
+        let current_config = load_window_config(&app_handle);
+        let config = WindowConfig {
+            monitored_windows,
+            auto_hide_delay: delay,
+            main_window_position: current_config.main_window_position,
+            preference_window_position: current_config.preference_window_position,
+            dark_mode: current_config.dark_mode,
+        };
+
+        if let Err(e) = save_window_config(&app_handle, &config) {
+            println!("Failed to save window config: {}", e);
+        }
+
         Ok(format!("Set auto hide delay to {} seconds", delay))
     } else {
         Err("Failed to access app state".to_string())
@@ -349,7 +522,7 @@ fn get_auto_hide_delay(app_handle: tauri::AppHandle) -> u64 {
             return app_state.auto_hide_delay;
         }
     }
-    10 // 默认10秒
+    5 // 默认5秒
 }
 
 // 开始监听窗口
@@ -429,21 +602,157 @@ fn get_current_window_titles() -> Vec<String> {
     windows
 }
 
+// 设置深色模式
+#[tauri::command]
+fn set_dark_mode(app_handle: tauri::AppHandle, dark_mode: bool) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        // 更新内存中的状态
+        if let Ok(mut app_state) = state.lock() {
+            app_state.dark_mode = dark_mode;
+        }
+
+        // 保存到配置文件
+        let current_config = load_window_config(&app_handle);
+        let config = WindowConfig {
+            monitored_windows: current_config.monitored_windows,
+            auto_hide_delay: current_config.auto_hide_delay,
+            main_window_position: current_config.main_window_position,
+            preference_window_position: current_config.preference_window_position,
+            dark_mode,
+        };
+
+        if let Err(e) = save_window_config(&app_handle, &config) {
+            return Err(format!("Failed to save dark mode setting: {}", e));
+        }
+
+        // 通知所有窗口更新主题
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.emit("dark-mode-changed", dark_mode);
+        }
+        if let Some(window) = app_handle.get_webview_window("preference") {
+            let _ = window.emit("dark-mode-changed", dark_mode);
+        }
+
+        Ok(format!("Dark mode set to: {}", dark_mode))
+    } else {
+        Err("Failed to access app state".to_string())
+    }
+}
+
+// 获取深色模式状态
+#[tauri::command]
+fn get_dark_mode(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    if let Some(state) = app_handle.try_state::<SharedState>() {
+        if let Ok(app_state) = state.lock() {
+            Ok(app_state.dark_mode)
+        } else {
+            Err("Failed to access app state".to_string())
+        }
+    } else {
+        Err("Failed to access app state".to_string())
+    }
+}
+
+// 打开配置文件夹
+#[tauri::command]
+fn open_config_folder(app_handle: tauri::AppHandle) -> Result<String, String> {
+    use std::process::Command;
+
+    let app_data_dir = match app_handle.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => return Err(format!("Failed to get app data directory: {}", e)),
+    };
+
+    // 确保目录存在
+    if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+        return Err(format!("Failed to create app data directory: {}", e));
+    }
+
+    // 在 Windows 上使用 explorer 打开文件夹
+    #[cfg(target_os = "windows")]
+    {
+        match Command::new("explorer").arg(&app_data_dir).spawn() {
+            Ok(_) => Ok(format!("Opened config folder: {}", app_data_dir.display())),
+            Err(e) => Err(format!("Failed to open config folder: {}", e)),
+        }
+    }
+
+    // 在 macOS 上使用 open 命令
+    #[cfg(target_os = "macos")]
+    {
+        match Command::new("open").arg(&app_data_dir).spawn() {
+            Ok(_) => Ok(format!("Opened config folder: {}", app_data_dir.display())),
+            Err(e) => Err(format!("Failed to open config folder: {}", e)),
+        }
+    }
+
+    // 在 Linux 上使用 xdg-open 命令
+    #[cfg(target_os = "linux")]
+    {
+        match Command::new("xdg-open").arg(&app_data_dir).spawn() {
+            Ok(_) => Ok(format!("Opened config folder: {}", app_data_dir.display())),
+            Err(e) => Err(format!("Failed to open config folder: {}", e)),
+        }
+    }
+}
+
+// 获取配置文件路径
+#[tauri::command]
+fn get_config_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let app_data_dir = match app_handle.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(e) => return Err(format!("Failed to get app data directory: {}", e)),
+    };
+
+    let config_file = app_data_dir.join("window_config.json");
+    Ok(config_file.to_string_lossy().to_string())
+}
+
 fn main() {
     tauri::Builder::default()
-        .manage(SharedState::default())
         .setup(|app| {
+            // 从配置文件加载窗口配置
+            let window_config = load_window_config(app.handle());
+
+            // 创建带有加载配置的应用状态
+            let app_state = AppState {
+                is_pinned: false,
+                monitored_windows: window_config.monitored_windows,
+                auto_hide_delay: window_config.auto_hide_delay,
+                last_seen_windows: Vec::new(),
+                monitoring_active: false,
+                dark_mode: window_config.dark_mode, // 从配置文件加载深色模式
+            };
+
+            app.manage(SharedState::new(Mutex::new(app_state)));
+
+            // 应用保存的主窗口位置
+            if let Some(main_window) = app.get_webview_window("main") {
+                if let Some(position) = window_config.main_window_position {
+                    let _ = main_window.set_position(tauri::Position::Physical(
+                        tauri::PhysicalPosition {
+                            x: position.x,
+                            y: position.y,
+                        },
+                    ));
+                    let _ = main_window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                        width: position.width,
+                        height: position.height,
+                    }));
+                    println!(
+                        "Restored main window position: {}x{} at ({}, {})",
+                        position.width, position.height, position.x, position.y
+                    );
+                }
+            }
+
             // 创建菜单项
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let toggle_item =
                 MenuItem::with_id(app, "toggle", "显示/隐藏窗口", true, None::<&str>)?;
-            let pin_item =
-                MenuItem::with_id(app, "pin", "固定模式", true, None::<&str>)?;
+            let pin_item = MenuItem::with_id(app, "pin", "置顶显示", true, None::<&str>)?;
             let config_item = MenuItem::with_id(app, "preference", "偏好设置", true, None::<&str>)?;
-            let menu = Menu::with_items(
-                app,
-                &[&toggle_item, &pin_item, &config_item, &quit_item],
-            )?;
+            let menu = Menu::with_items(app, &[&toggle_item, &pin_item, &config_item, &quit_item])?;
 
             // 构建托盘
             TrayIconBuilder::new()
@@ -464,7 +773,7 @@ fn main() {
                         }
                     }
                     "pin" => {
-                        // 切换固定模式 - 获取当前状态并切换
+                        // 切换置顶显示 - 获取当前状态并切换
                         let current_pinned = if let Some(state) = app.try_state::<SharedState>() {
                             if let Ok(app_state) = state.lock() {
                                 app_state.is_pinned
@@ -491,28 +800,66 @@ fn main() {
                         }
 
                         println!(
-                            "Pin mode {} via tray menu",
-                            if new_pinned { "enabled" } else { "disabled" }
+                            "置顶显示 {} via tray menu",
+                            if new_pinned { "已启用" } else { "已禁用" }
                         );
                     }
+
                     "preference" => {
                         let preference_window = app.get_webview_window("preference");
                         if let Some(window) = preference_window {
                             window.show().unwrap();
                             window.set_focus().unwrap();
                         } else {
-                            WebviewWindowBuilder::new(
+                            let mut builder = WebviewWindowBuilder::new(
                                 app,
                                 "preference",
                                 tauri::WebviewUrl::App("preference.html".into()),
                             )
                             .title("偏好设置")
-                            .min_inner_size(800.0, 600.0)
-                            .build()
-                            .unwrap();
+                            .min_inner_size(800.0, 600.0);
+
+                            // 尝试加载保存的窗口位置
+                            if let Some(position) = get_window_position(
+                                app.app_handle().clone(),
+                                "preference".to_string(),
+                            ) {
+                                builder = builder
+                                    .position(position.x as f64, position.y as f64)
+                                    .inner_size(position.width as f64, position.height as f64);
+                                println!(
+                                    "Restored preference window position: {}x{} at ({}, {})",
+                                    position.width, position.height, position.x, position.y
+                                );
+                            } else {
+                                println!(
+                                    "No saved preference window position found, using default"
+                                );
+                            }
+
+                            builder.build().unwrap();
                         }
                     }
                     _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        // 左键点击显示/隐藏主窗口
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
                 })
                 .build(app)?;
 
@@ -526,11 +873,94 @@ fn main() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     // 只对主窗口阻止关闭，其他窗口（如偏好设置）允许正常关闭
                     if window.label() == "main" {
+                        // 主窗口关闭前保存位置
+                        if let Ok(position) = window.outer_position() {
+                            if let Ok(size) = window.outer_size() {
+                                let _ = save_window_position(
+                                    window.app_handle().clone(),
+                                    "main".to_string(),
+                                    position.x,
+                                    position.y,
+                                    size.width,
+                                    size.height,
+                                );
+                            }
+                        }
                         // 主窗口没有关闭按钮，如果触发关闭事件就隐藏窗口
                         api.prevent_close();
                         let _ = window.hide();
+                    } else if window.label() == "preference" {
+                        // 偏好设置窗口关闭前保存位置
+                        if let Ok(position) = window.outer_position() {
+                            if let Ok(size) = window.inner_size() {
+                                let _ = save_window_position(
+                                    window.app_handle().clone(),
+                                    "preference".to_string(),
+                                    position.x,
+                                    position.y,
+                                    size.width,
+                                    size.height,
+                                );
+                                println!(
+                                    "Saved preference window position: {}x{} at ({}, {})",
+                                    size.width, size.height, position.x, position.y
+                                );
+                            }
+                        }
                     }
-                    // 偏好设置窗口等其他窗口允许正常关闭
+                }
+                tauri::WindowEvent::Moved(position) => {
+                    // 窗口移动时保存位置
+                    if window.label() == "main" {
+                        if let Ok(size) = window.outer_size() {
+                            let _ = save_window_position(
+                                window.app_handle().clone(),
+                                window.label().to_string(),
+                                position.x,
+                                position.y,
+                                size.width,
+                                size.height,
+                            );
+                        }
+                    } else if window.label() == "preference" {
+                        if let Ok(size) = window.inner_size() {
+                            let _ = save_window_position(
+                                window.app_handle().clone(),
+                                window.label().to_string(),
+                                position.x,
+                                position.y,
+                                size.width,
+                                size.height,
+                            );
+                        }
+                    }
+                }
+                tauri::WindowEvent::Resized(size) => {
+                    // 窗口调整大小时保存位置
+                    if window.label() == "main" {
+                        if let Ok(position) = window.outer_position() {
+                            let _ = save_window_position(
+                                window.app_handle().clone(),
+                                window.label().to_string(),
+                                position.x,
+                                position.y,
+                                size.width,
+                                size.height,
+                            );
+                        }
+                    } else if window.label() == "preference" {
+                        if let Ok(position) = window.outer_position() {
+                            // 对于偏好设置窗口，size 参数已经是 inner_size
+                            let _ = save_window_position(
+                                window.app_handle().clone(),
+                                window.label().to_string(),
+                                position.x,
+                                position.y,
+                                size.width,
+                                size.height,
+                            );
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -551,7 +981,13 @@ fn main() {
             get_auto_hide_delay,
             start_window_monitoring,
             stop_window_monitoring,
-            check_window_changes
+            check_window_changes,
+            save_window_position,
+            get_window_position,
+            set_dark_mode,
+            get_dark_mode,
+            open_config_folder,
+            get_config_file_path
         ]) // 添加命令处理
         .run(tauri::generate_context!())
         .expect("error while running tauri app");
