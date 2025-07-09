@@ -566,13 +566,13 @@ function PreferenceApp() {
           <Box sx={{ textAlign: 'center', py: 3 }}>
             <VolumeUpIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
             <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
-              音频输出切换器
+              AudioCat
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               版本 1.0.0
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              一个简单易用的音频输出设备切换工具
+              可爱的音频输出设备切换工具 🐱
             </Typography>
           </Box>
         </CardContent>

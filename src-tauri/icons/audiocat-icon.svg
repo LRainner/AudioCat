@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景圆形 -->
+  <circle cx="64" cy="64" r="60" fill="#4A90E2" stroke="#2E5C8A" stroke-width="2"/>
+  
+  <!-- 猫咪头部 -->
+  <ellipse cx="64" cy="70" rx="28" ry="25" fill="#FF8C42"/>
+
+  <!-- 橘猫条纹 -->
+  <ellipse cx="64" cy="65" rx="22" ry="4" fill="#E67E22" opacity="0.6"/>
+  <ellipse cx="64" cy="72" rx="20" ry="3" fill="#E67E22" opacity="0.6"/>
+  <ellipse cx="64" cy="78" rx="18" ry="3" fill="#E67E22" opacity="0.6"/>
+
+  <!-- 橘猫额头的经典"M"形条纹 -->
+  <path d="M 52 58 Q 58 54 64 58 Q 70 54 76 58" stroke="#E67E22" stroke-width="2" fill="none" opacity="0.8"/>
+  <path d="M 54 62 Q 60 59 64 62" stroke="#E67E22" stroke-width="1.5" fill="none" opacity="0.6"/>
+  <path d="M 64 62 Q 68 59 74 62" stroke="#E67E22" stroke-width="1.5" fill="none" opacity="0.6"/>
+
+  <!-- 猫咪耳朵 -->
+  <path d="M 42 52 L 36 38 L 52 48 Z" fill="#FF8C42" stroke="#E67E22" stroke-width="1"/>
+  <path d="M 86 52 L 92 38 L 76 48 Z" fill="#FF8C42" stroke="#E67E22" stroke-width="1"/>
+
+  <!-- 耳朵内部 -->
+  <path d="M 42 50 L 38 42 L 48 48 Z" fill="#FFB366"/>
+  <path d="M 86 50 L 90 42 L 80 48 Z" fill="#FFB366"/>
+  
+  <!-- 猫咪眼睛 - 更大更可爱 -->
+  <ellipse cx="56" cy="68" rx="5" ry="7" fill="#2C3E50"/>
+  <ellipse cx="72" cy="68" rx="5" ry="7" fill="#2C3E50"/>
+
+  <!-- 眼睛高光 - 更大更亮 -->
+  <ellipse cx="57.5" cy="65" rx="2" ry="2.5" fill="#FFFFFF"/>
+  <ellipse cx="73.5" cy="65" rx="2" ry="2.5" fill="#FFFFFF"/>
+
+  <!-- 小小的眼睛反光点 -->
+  <circle cx="58.5" cy="70" r="0.8" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="74.5" cy="70" r="0.8" fill="#FFFFFF" opacity="0.8"/>
+  
+  <!-- 猫咪鼻子 -->
+  <path d="M 64 75 L 61 78 L 67 78 Z" fill="#D35400"/>
+  
+  <!-- 猫咪嘴巴 -->
+  <path d="M 64 78 Q 58 82 52 80" stroke="#2C3E50" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <path d="M 64 78 Q 70 82 76 80" stroke="#2C3E50" stroke-width="2" fill="none" stroke-linecap="round"/>
+  
+  <!-- 猫咪胡须 -->
+  <line x1="35" y1="72" x2="45" y2="70" stroke="#2C3E50" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="35" y1="78" x2="45" y2="78" stroke="#2C3E50" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="83" y1="70" x2="93" y2="72" stroke="#2C3E50" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="83" y1="78" x2="93" y2="78" stroke="#2C3E50" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- 音频波纹效果 -->
+  <g opacity="0.7">
+    <!-- 第一层波纹 -->
+    <path d="M 20 64 Q 25 54 30 64 Q 25 74 20 64" stroke="#FFFFFF" stroke-width="2" fill="none"/>
+    <path d="M 98 64 Q 103 54 108 64 Q 103 74 98 64" stroke="#FFFFFF" stroke-width="2" fill="none"/>
+    
+    <!-- 第二层波纹 -->
+    <path d="M 15 64 Q 22 50 29 64 Q 22 78 15 64" stroke="#FFFFFF" stroke-width="1.5" fill="none" opacity="0.6"/>
+    <path d="M 99 64 Q 106 50 113 64 Q 106 78 99 64" stroke="#FFFFFF" stroke-width="1.5" fill="none" opacity="0.6"/>
+    
+    <!-- 第三层波纹 -->
+    <path d="M 10 64 Q 19 46 28 64 Q 19 82 10 64" stroke="#FFFFFF" stroke-width="1" fill="none" opacity="0.4"/>
+    <path d="M 100 64 Q 109 46 118 64 Q 109 82 100 64" stroke="#FFFFFF" stroke-width="1" fill="none" opacity="0.4"/>
+  </g>
+  
+  <!-- 音符装饰 -->
+  <g fill="#FFFFFF" opacity="0.8">
+    <!-- 音符1 -->
+    <circle cx="25" cy="35" r="2"/>
+    <rect x="27" y="25" width="1" height="12"/>
+    <path d="M 27 25 Q 32 23 32 28" stroke="#FFFFFF" stroke-width="1" fill="none"/>
+    
+    <!-- 音符2 -->
+    <circle cx="100" cy="40" r="1.5"/>
+    <rect x="101.5" y="32" width="0.8" height="10"/>
+    
+    <!-- 音符3 -->
+    <circle cx="105" cy="90" r="1.5"/>
+    <rect x="106.5" y="82" width="0.8" height="10"/>
+  </g>
+  
+  <!-- 可爱的腮红 -->
+  <ellipse cx="45" cy="78" rx="3" ry="2" fill="#F39C12" opacity="0.7"/>
+  <ellipse cx="83" cy="78" rx="3" ry="2" fill="#F39C12" opacity="0.7"/>
+</svg>

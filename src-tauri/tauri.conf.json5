@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-demo",
-  "version": "0.1.0",
-  "identifier": "com.tauri-demo.app",
+  "productName": "AudioCat",
+  "version": "1.0.0",
+  "identifier": "com.audiocat.app",
   "build": {
     "beforeDevCommand": "npm run dev --prefix ../frontend",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "音频输出切换器",
+        "title": "AudioCat - 音频输出切换器",
         "width": 340,
         "height": 200,
         "minWidth": 320,
@@ -54,5 +54,5 @@
       "icons/icon.ico"
     ]
   },
-  "mainBinaryName": "tauri-demo"
+  "mainBinaryName": "audiocat"
 }
